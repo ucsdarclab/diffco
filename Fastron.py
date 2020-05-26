@@ -5,12 +5,13 @@ from sklearn.svm import SVC
 from scipy import ndimage
 
 class Obstacle:
-    def __init__(self, kind, position, size):
+    def __init__(self, kind, position, size, cost=1):
         self.kind = kind
         if self.kind not in ['circle', 'rect']:
             raise NotImplementedError('Obstacle kind {} not supported'.format(kind))
         self.position = np.array(position)
         self.size = np.array(size)
+        self.cost = cost
     
     def is_collision(self, point):
         if self.kind == 'circle':
@@ -19,6 +20,9 @@ class Obstacle:
             return np.all(np.abs(self.position-point) < self.size/2)
         else:
             raise NotImplementedError('Obstacle kind {} not supported'.format(self.kind))
+    
+    def get_cost(self):
+        return self.cost
 
 class CollisionChecker():
     def __init__(self, obstacles):
@@ -43,7 +47,7 @@ class Fastron(CollisionChecker):
     def initialize(self, num_init_points=100):
         self.support_points = np.random.random((num_init_points, 2)) * 10
         self.gains = np.zeros(num_init_points)
-        self.gamma = 3 #2*self.support_points.var()
+        self.gamma = 0.2 # 2*self.support_points.var()
         K = np.tile(self.support_points[np.newaxis, :], (num_init_points, 1, 1))
         # self.kernel_matrix = (self.support_points@self.support_points.T+1)**2
         self.kernel_matrix = 1/(1+self.gamma/2*np.sum((K-K.transpose(1, 0, 2))**2, axis=2))**2
@@ -151,14 +155,14 @@ def vis(model, size=100, seed=2019):
         size = [size, size]
     xx, yy = np.meshgrid(np.linspace(0, 10, size[0]), np.linspace(0, 10, size[1]))
     grid_points = np.stack([xx, yy], axis=2).reshape((-1, 2))
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(28, 10)) #(figsize=(42, 10))
 
     np.random.seed(seed)
     model.initialize(1000)
     model.train(1000, method='original')
     real_support_points = model.support_points
     grid_score = np.fromiter(map(model.score_original, grid_points), np.float).reshape((size[0], size[1]))
-    ax1 = plt.subplot(1,3,1)
+    ax1 = plt.subplot(1,2,1)
     c = ax1.pcolormesh(xx, yy, grid_score, cmap='RdBu_r', vmin=-np.abs(grid_score).max(), vmax=np.abs(grid_score).max())
     ax1.scatter(real_support_points[:, 0], real_support_points[:, 1], marker='.', c='black')
     ax1.contour(xx, yy, (grid_score).astype(float), levels=0)
@@ -171,30 +175,30 @@ def vis(model, size=100, seed=2019):
     score_grad /= np.linalg.norm(score_grad, axis=2, keepdims=True)
     score_grad_x, score_grad_y = score_grad[:, :, 0], score_grad[:, :, 1]
     ax1.quiver(xx[::10, ::10], yy[::10, ::10], score_grad_x, score_grad_y, scale=30, color='red')
-    ax1.set_title('Original Fastron, no. of support points = {}'.format(len(real_support_points)))
+    ax1.set_title('Original Fastron (gamma={}), no. of support points = {}'.format(model.gamma, len(real_support_points)))
 
-    grid_nn_score = np.fromiter(map(model.score_nn, grid_points), np.float).reshape((size[0], size[1]))
-    ax2 = plt.subplot(1,3,2)
-    c = ax2.pcolormesh(xx, yy, grid_nn_score, cmap='RdBu_r', vmin=-np.abs(grid_nn_score).max(), vmax=np.abs(grid_nn_score).max())
-    ax2.scatter(real_support_points[:, 0], real_support_points[:, 1], marker='.', c='black')
-    ax2.contour(xx, yy, (grid_nn_score).astype(float), levels=0)
-    ax2.axis('equal')
-    fig.colorbar(c, ax=ax2)
-    sparse_score = grid_nn_score[::10, ::10]
-    score_grad_x = -ndimage.sobel(sparse_score, axis=1)
-    score_grad_y = -ndimage.sobel(sparse_score, axis=0)
-    score_grad = np.stack([score_grad_x, score_grad_y], axis=2)
-    score_grad /= np.linalg.norm(score_grad, axis=2, keepdims=True)
-    score_grad_x, score_grad_y = score_grad[:, :, 0], score_grad[:, :, 1]
-    ax2.quiver(xx[::10, ::10], yy[::10, ::10], score_grad_x, score_grad_y, scale=30, color='red')
-    ax2.set_title('NN inference, no. of support points = {}'.format(len(real_support_points)))
+    # grid_nn_score = np.fromiter(map(model.score_nn, grid_points), np.float).reshape((size[0], size[1]))
+    # ax2 = plt.subplot(1,3,2)
+    # c = ax2.pcolormesh(xx, yy, grid_nn_score, cmap='RdBu_r', vmin=-np.abs(grid_nn_score).max(), vmax=np.abs(grid_nn_score).max())
+    # ax2.scatter(real_support_points[:, 0], real_support_points[:, 1], marker='.', c='black')
+    # ax2.contour(xx, yy, (grid_nn_score).astype(float), levels=0)
+    # ax2.axis('equal')
+    # fig.colorbar(c, ax=ax2)
+    # sparse_score = grid_nn_score[::10, ::10]
+    # score_grad_x = -ndimage.sobel(sparse_score, axis=1)
+    # score_grad_y = -ndimage.sobel(sparse_score, axis=0)
+    # score_grad = np.stack([score_grad_x, score_grad_y], axis=2)
+    # score_grad /= np.linalg.norm(score_grad, axis=2, keepdims=True)
+    # score_grad_x, score_grad_y = score_grad[:, :, 0], score_grad[:, :, 1]
+    # ax2.quiver(xx[::10, ::10], yy[::10, ::10], score_grad_x, score_grad_y, scale=30, color='red')
+    # ax2.set_title('NN inference, no. of support points = {}'.format(len(real_support_points)))
 
     np.random.seed(seed)
     model.initialize(1000)
     model.train(1000, method='svm')
     real_support_points = model.support_points
     grid_svm_score = np.fromiter(map(model.score_svm, grid_points), np.float).reshape((size[0], size[1]))
-    ax3 = plt.subplot(1,3,3)
+    ax3 = plt.subplot(122)
     c = ax3.pcolormesh(xx, yy, grid_svm_score, cmap='RdBu_r', vmin=-np.abs(grid_svm_score).max(), vmax=np.abs(grid_svm_score).max())
     ax3.scatter(real_support_points[:, 0], real_support_points[:, 1], marker='.', c='black')
     ax3.contour(xx, yy, (grid_svm_score).astype(float), levels=0)
@@ -209,7 +213,7 @@ def vis(model, size=100, seed=2019):
     ax3.quiver(xx[::10, ::10], yy[::10, ::10], score_grad_x, score_grad_y, scale=30, color='red')
     ax3.set_title('SVM, no. of support points={}'.format(len(model.support_points)))
 
-    plt.show()
+    plt.savefig('plot.png')
 
 if __name__ == '__main__':
     obstacles = [

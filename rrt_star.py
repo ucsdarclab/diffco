@@ -3,6 +3,7 @@ from matplotlib import pyplot as plt
 from matplotlib.collections import LineCollection
 from mlxtend.plotting import plot_decision_regions
 from Fastron import *
+from MultiFastron import *
 
 def euclidean_dist(a, b):
     return np.linalg.norm(a-b)
@@ -26,7 +27,7 @@ class RRT_STAR:
             self.parent = parent if parent is not None else self
             self.dist = dist
 
-    def __init__(self, start, goal, space_range, obstacles, local_planner, dist_func=euclidean_dist, rewire=True):
+    def __init__(self, start, goal, space_range, obstacles, local_planner, collision_checker=None, dist_func=euclidean_dist, rewire=True):
         self.start = start
         self.goal = goal
         self.space_range = space_range
@@ -39,7 +40,14 @@ class RRT_STAR:
         self.route = None
         self.end_node = None
         self.shortest_dist = np.inf
-        self.collision_checker = Fastron(self.obstacles)
+        self.collision_checker = CollisionChecker(self.obstacles) if collision_checker is None else collision_checker
+        self.animate_cnt = 0
+
+    def weighted_dist(self, a, b):
+        pred_a, pred_b = self.collision_checker.predict(a), self.collision_checker.predict(b)
+        cost_a, cost_b = self.obstacles[pred_a-1].get_cost(), self.obstacles[pred_b-1].get_cost()
+        return np.linalg.norm(a-b)*np.maximum(cost_a, cost_b)
+        
     
     def plan(self, max_tree_size=10000, animate_interval=50):
         start_node = self.Node(self.start, dist=0)
@@ -121,6 +129,7 @@ class RRT_STAR:
             return traj, check_dist
     
     def animate(self, traj=None):
+        self.animate_cnt += 1
         segments = map(lambda node: (node.config, node.parent.config), self.node_list)
         line_segments = LineCollection(segments)
         _, self.ax = plt.subplots()
@@ -149,13 +158,18 @@ class RRT_STAR:
 
 if __name__ == '__main__':
     obstacles = [
-        ('circle', (2, 1), 1.5),
-        ('rect', (5, 7), (5, 3))]
+        ('circle', (2, 1), 5, 0.01),
+        ('rect', (5, 7), (5, 3), 2)]
     obstacles = [Obstacle(*param) for param in obstacles]
     # obstacles = []
-    # planner = RRT_STAR((0, 0), (10, 10), (10, 10), obstacles, radius_local_planner, euclidean_dist, rewire=True)
-    # print(planner.plan(2000, animate_interval=500))
-    checker = Fastron(obstacles)
+    checker = MultiFastron(obstacles, len(obstacles))
+    checker.train(1000)
+    planner = RRT_STAR((0, 0), (10, 10), (10, 10), obstacles, radius_local_planner)#, euclidean_dist, rewire=True)
+    planner.collision_checker = checker
+    planner.dist_func = planner.weighted_dist
+    print(planner.plan(2000, animate_interval=500))
+    # checker = Fastron(obstacles)
+    
     # plt.axis('equal')
     # plt.xlim((0, 10))
     # plt.ylim((0, 10))

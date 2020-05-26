@@ -7,23 +7,28 @@ class MultiChecker:
     
     def predict(self, point):
         return np.fromiter(map(lambda obj: 1 if obj.is_collision(point) else -1, self.objects), int)
+    
+    def line_collision(self, start, target, res=50):
+        points = map(lambda i: start + (target - start)/res*i, range(res))
+        return any(map(lambda p: self.predict(p), points))
 
 class MultiFastron(MultiChecker):
-    def __init__(self, objects, num_class, gt_checker=None):
-        super().__init__(obstacles)
+    def __init__(self, objects, num_class=None, gamma=1, beta=1, gt_checker=None):
+        super().__init__(objects)
         self.gt_checker = gt_checker if gt_checker is not None else MultiChecker(self.objects)
-        self.num_class = num_class
+        self.num_class = len(objects) if num_class is None else num_class
+        self.gamma = gamma
+        self.beta = beta
+        self.beta = beta
         self.initialize(1000)
 
     def initialize(self, num_init_points=100):
         self.support_points = np.random.random((num_init_points, 2)) * 10
         self.gains = np.zeros((self.num_class, num_init_points))
-        self.gamma = 3
         K = np.tile(self.support_points[np.newaxis, :], (num_init_points, 1, 1))
         self.kernel_matrix = 1/(1+self.gamma/2*np.sum((K-K.transpose(1, 0, 2))**2, axis=2))**2
         self.hypothesis = self.gains@self.kernel_matrix
         self.max_n_support = 200
-        self.conditional_bias = 1
     
     def train_sgd(self, max_iteration=1000):
         pass
@@ -43,7 +48,7 @@ class MultiFastron(MultiChecker):
             for class_margin, class_y, class_gain, class_hypo in zip(margin, self.y, self.gains, self.hypothesis):
                 min_margin_idx = np.argmin(class_margin)
                 if class_margin[min_margin_idx] <= 0:
-                    delta_gain = self.conditional_bias**((1+class_y[min_margin_idx])/2) * class_y[min_margin_idx] - class_hypo[min_margin_idx]
+                    delta_gain = self.beta**((1+class_y[min_margin_idx])/2) * class_y[min_margin_idx] - class_hypo[min_margin_idx]
                     class_gain[min_margin_idx] += delta_gain
                     class_hypo += delta_gain * self.kernel_matrix[min_margin_idx]
         valid = np.sum(self.gains != 0, axis=0)
@@ -99,7 +104,7 @@ if __name__ == '__main__':
     obstacles = [Obstacle(*param) for param in obstacles]
 
     np.random.seed(1314)
-    classifier = MultiFastron(obstacles, len(obstacles))
+    classifier = MultiFastron(obstacles, len(obstacles), gamma=1, beta=1)
     classifier.train(1000)
     print(classifier.gains, classifier.gains.size)
     classifier.vis(200)
