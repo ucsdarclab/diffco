@@ -5,7 +5,7 @@ from sklearn.svm import SVC
 from scipy import ndimage
 
 class Obstacle:
-    def __init__(self, kind, position, size, cost=1):
+    def __init__(self, kind, position, size, cost=np.inf):
         self.kind = kind
         if self.kind not in ['circle', 'rect']:
             raise NotImplementedError('Obstacle kind {} not supported'.format(kind))

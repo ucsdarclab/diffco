@@ -14,7 +14,7 @@ def radius_local_planner(start, target, dist_func, radius=0.5, n_local_plan=10):
     thetas = np.arange(0, 2*np.pi, 2*np.pi / n_local_plan)
     # print('Thetas: ', thetas)
     local_targets = start + np.stack([np.cos(thetas)*radius, np.sin(thetas)*radius], axis=1)
-    distances = np.array(list(map(lambda config: dist_func(config, target), local_targets)))                
+    distances = np.fromiter(map(lambda config: dist_func(config, target), local_targets), float)
     # print('Distances: ', distances)
     # print('min move: ', local_targets[np.argmin(distances)])
     return local_targets[np.argmin(distances)]
@@ -45,8 +45,8 @@ class RRT_STAR:
 
     def weighted_dist(self, a, b):
         pred_a, pred_b = self.collision_checker.predict(a), self.collision_checker.predict(b)
-        cost_a, cost_b = self.obstacles[pred_a-1].get_cost(), self.obstacles[pred_b-1].get_cost()
-        return np.linalg.norm(a-b)*np.maximum(cost_a, cost_b)
+        cost_a, cost_b = self.obstacles[pred_a-1].get_cost() if pred_a > 0 else 0, self.obstacles[pred_b-1].get_cost() if pred_b > 0 else 0
+        return np.linalg.norm(a-b)*(1+np.maximum(cost_a, cost_b)) if np.maximum(cost_a, cost_b) != np.inf else np.inf
         
     
     def plan(self, max_tree_size=10000, animate_interval=50):
@@ -71,6 +71,7 @@ class RRT_STAR:
             # print(new_state, len(self.node_list))
             
             # collision_checks = map(lambda obs: obs.is_collision(new_state), self.obstacles)
+            # print(new_state, self.collision_checker.line_collision(nearest_node.config, new_state))
             if not self.collision_checker.line_collision(nearest_node.config, new_state):
                 new_node = self.Node(new_state, dist=nearest_node.dist+self.dist_func(nearest_node.config, new_state), parent=nearest_node)
                 if self.dist_func(new_state, self.goal) < 1e-4 and new_node.dist < self.shortest_dist:
@@ -158,16 +159,18 @@ class RRT_STAR:
 
 if __name__ == '__main__':
     obstacles = [
-        ('circle', (2, 1), 5, 0.01),
-        ('rect', (5, 7), (5, 3), 2)]
+        ('circle', (2, 1), 3, 0.2),
+        ('rect', (5, 7), (5, 3), np.inf)]
     obstacles = [Obstacle(*param) for param in obstacles]
+    print(obstacles)
     # obstacles = []
     checker = MultiFastron(obstacles, len(obstacles))
     checker.train(1000)
+    checker.vis()
     planner = RRT_STAR((0, 0), (10, 10), (10, 10), obstacles, radius_local_planner)#, euclidean_dist, rewire=True)
     planner.collision_checker = checker
     planner.dist_func = planner.weighted_dist
-    print(planner.plan(2000, animate_interval=500))
+    print(planner.plan(200, animate_interval=50))
     # checker = Fastron(obstacles)
     
     # plt.axis('equal')
@@ -176,6 +179,6 @@ if __name__ == '__main__':
     # plot_decision_regions(X=checker.support_points, y=checker.y.astype(np.integer), clf=checker, markers=[None], legend=None, filler_feature_ranges=[(0, 10), (0, 10)])
     # plt.show()
     # print(checker.support_points, checker.gains)
-    checker.vis()
+    # checker.vis()
             
 

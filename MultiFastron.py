@@ -9,8 +9,8 @@ class MultiChecker:
         return np.fromiter(map(lambda obj: 1 if obj.is_collision(point) else -1, self.objects), int)
     
     def line_collision(self, start, target, res=50):
-        points = map(lambda i: start + (target - start)/res*i, range(res))
-        return any(map(lambda p: self.predict(p), points))
+        predicts = list(map(lambda i: self.predict(start + (target - start)/res*i), range(res)))
+        return any(map(lambda p: p > 0 and self.objects[p-1].get_cost() == np.inf, predicts))
 
 class MultiFastron(MultiChecker):
     def __init__(self, objects, num_class=None, gamma=1, beta=1, gt_checker=None):
@@ -68,6 +68,17 @@ class MultiFastron(MultiChecker):
         score = self.gains@kernel_values
         return score
     
+    def line_collision(self, start, target, res=50):
+        points = np.linspace(start, target, res).reshape((1, res, -1))
+        pair_diff = self.support_points.reshape((len(self.support_points), 1, -1)) - points
+        kernel_values = 1/(1+self.gamma/2*np.sum(pair_diff**2, axis=2))**2
+        scores = self.gains@kernel_values
+        predicts = np.argmax(scores, axis=0)
+        predicts[scores[predicts, range(len(predicts))] <= 0] = -1
+        predicts += 1
+        return any(map(lambda p: p > 0 and self.objects[p-1].get_cost() == np.inf, predicts))
+
+    
     def vis(self, size=100):
         if isinstance(size, int):
             size = [size, size]
@@ -94,7 +105,7 @@ class MultiFastron(MultiChecker):
         # ax2.axis('equal')
         # fig.colorbar(c, ax=ax2)
 
-        plt.show()
+        plt.show(block=False)
 
 
 if __name__ == '__main__':
@@ -108,3 +119,4 @@ if __name__ == '__main__':
     classifier.train(1000)
     print(classifier.gains, classifier.gains.size)
     classifier.vis(200)
+    plt.show()
