@@ -9,7 +9,7 @@ def euclidean_dist(a, b):
     return np.linalg.norm(a-b)
 
 def radius_local_planner(start, target, dist_func, radius=0.5, n_local_plan=10):
-    if dist_func(start, target) < 0.5:
+    if euclidean_dist(start, target) < 0.5:
         return target
     thetas = np.arange(0, 2*np.pi, 2*np.pi / n_local_plan)
     # print('Thetas: ', thetas)
@@ -32,6 +32,7 @@ class RRT_STAR:
         self.goal = goal
         self.space_range = space_range
         self.obstacles = obstacles
+        self.object_costs = np.fromiter(map(lambda obs: obs.get_cost(), self.obstacles), np.float)
         self.local_planner = local_planner
         self.dist_func = dist_func
         self.rewire = rewire
@@ -47,6 +48,15 @@ class RRT_STAR:
         pred_a, pred_b = self.collision_checker.predict(a), self.collision_checker.predict(b)
         cost_a, cost_b = self.obstacles[pred_a-1].get_cost() if pred_a > 0 else 0, self.obstacles[pred_b-1].get_cost() if pred_b > 0 else 0
         return np.linalg.norm(a-b)*(1+np.maximum(cost_a, cost_b)) if np.maximum(cost_a, cost_b) != np.inf else np.inf
+    
+    def score_dist(self, a, b, res=10):
+        scores = self.collision_checker.score(np.linspace(a, b, res)).T # shape =[res, num_obj]
+        cost = np.inf if scores.max() > 0 else np.max(np.exp(scores)@self.object_costs)
+        # score_a, score_b = self.collision_checker.score(a), self.collision_checker.score(b)
+        # cost_a = np.inf if score_a.max() > 0 else np.exp(score_a)@self.object_costs
+        # cost_b = np.inf if score_b.max() > 0 else np.exp(score_b)@self.object_costs
+        # print(np.linalg.norm(a-b)*(1+(cost_a+cost_b)/2))
+        return np.linalg.norm(a-b)*(1+cost)
         
     
     def plan(self, max_tree_size=10000, animate_interval=50):
@@ -74,7 +84,7 @@ class RRT_STAR:
             # print(new_state, self.collision_checker.line_collision(nearest_node.config, new_state))
             if not self.collision_checker.line_collision(nearest_node.config, new_state):
                 new_node = self.Node(new_state, dist=nearest_node.dist+self.dist_func(nearest_node.config, new_state), parent=nearest_node)
-                if self.dist_func(new_state, self.goal) < 1e-4 and new_node.dist < self.shortest_dist:
+                if euclidean_dist(new_state, self.goal) < 1e-4 and new_node.dist < self.shortest_dist:
                     self.route, self.shortest_dist = self.get_route()
                     if new_node.dist < self.shortest_dist:
                         self.end_node = new_node
@@ -154,23 +164,73 @@ class RRT_STAR:
             else:
                 raise NotImplementedError('Unknown obstacle type')
         plt.show()
+
+    def vis_cost(self, size=100):
+        if isinstance(size, int):
+            size = [size, size]
+        start = None
+        target = None
+        self.figure, self.ax = plt.subplots()
+        self.ax.set_xlim(-5, 15)
+        self.ax.set_ylim(-5, 15)
+        self.ax.set_aspect('equal', 'datalim')
+        def onclick(event):
+            nonlocal start, target
+            print(start, target)
+            if start is not None and target is None:
+                print('Hello')
+                target = np.array([event.xdata, event.ydata])
+                print(start, target)
+                self.ax.add_line(plt.Line2D([start[0], target[0]], [start[1], target[1]]))
+                self.figure.canvas.draw()
+                print('Cost {:.4f}'.format(self.dist_func(start, target)))
+                start, target = None, None
+            else:
+                start = np.array([event.xdata, event.ydata])
+            print('%s click: button=%d, x=%d, y=%d, xdata=%f, ydata=%f' %
+                ('double' if event.dblclick else 'single', event.button,
+           event.x, event.y, event.xdata, event.ydata))
+        for obs in self.obstacles:
+            if obs.kind == 'circle':
+                circle_artist = plt.Circle(obs.position, radius=obs.size/2, color='black')
+                self.ax.add_artist(circle_artist)
+            elif obs.kind == 'rect':
+                rect_artist = plt.Rectangle(obs.position-obs.size/2, obs.size[0], obs.size[1], color='black')
+                self.ax.add_artist(rect_artist)
+            else:
+                raise NotImplementedError('Unknown obstacle type')
+        xx, yy = np.meshgrid(np.linspace(0, 10, size[0]), np.linspace(0, 10, size[1]))
+        grid_points = np.stack([xx, yy], axis=2).reshape((-1, 2))
+        grid_score = self.collision_checker.score(grid_points).max(axis=0).reshape((size[0], size[1]))
+        c = self.ax.pcolormesh(xx, yy, grid_score, cmap='RdBu_r', vmin=-np.abs(grid_score).max(), vmax=np.abs(grid_score).max())
+        self.ax.scatter(self.collision_checker.support_points[:, 0], self.collision_checker.support_points[:, 1], marker='.', c='black')
+        self.ax.contour(xx, yy, (grid_score>0).astype(float), levels=1)
+        self.figure.colorbar(c, ax=self.ax)
+        self.figure.canvas.mpl_connect('button_press_event', onclick)
+        plt.show()
+        
         
 
 
 if __name__ == '__main__':
+    # obstacles = [
+    #     ('circle', (2, 1), 3, 0.2),
+    #     ('rect', (5, 7), (5, 3), np.inf)]
     obstacles = [
-        ('circle', (2, 1), 3, 0.2),
-        ('rect', (5, 7), (5, 3), np.inf)]
+        ('circle', (6, 2), 1.5, 0.2),
+        ('rect', (2, 6), (1.5, 1.5), 100)]
     obstacles = [Obstacle(*param) for param in obstacles]
     print(obstacles)
     # obstacles = []
-    checker = MultiFastron(obstacles, len(obstacles))
-    checker.train(1000)
-    checker.vis()
+    checker = MultiFastron(obstacles, len(obstacles), gamma=0.2)
+    checker.train(10000)
+    # checker.vis()
     planner = RRT_STAR((0, 0), (10, 10), (10, 10), obstacles, radius_local_planner)#, euclidean_dist, rewire=True)
     planner.collision_checker = checker
-    planner.dist_func = planner.weighted_dist
-    print(planner.plan(200, animate_interval=50))
+    # planner.dist_func = planner.weighted_dist
+    planner.dist_func = planner.score_dist
+    planner.vis_cost()
+    # print(planner.plan(500, animate_interval=500))
     # checker = Fastron(obstacles)
     
     # plt.axis('equal')
