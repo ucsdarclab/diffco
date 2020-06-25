@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 
 class KernelFunc:
     def __init__(self):
@@ -18,9 +19,10 @@ class RQKernel(KernelFunc):
             xs = xs[np.newaxis, :]
         xs = xs[np.newaxis, :] # change to [1, len(x), channel]
         pair_diff = x_primes[:, np.newaxis] - xs
-        kvalues = (1/(1+self.gamma/self.p*np.sum(pair_diff**2, axis=2))**self.p)
+        kvalues = (1/(1+self.gamma/self.p*torch.sum(pair_diff**2, dim=2))**self.p)
         if kvalues.shape[1] == 1:
             kvalues = kvalues.squeeze(1)
+
         return kvalues
 
 class CauchyKernel(KernelFunc):
@@ -46,10 +48,28 @@ class MultiQuadratic(KernelFunc):
             xs = xs[np.newaxis, :]
         xs = xs[np.newaxis, :] # change to [1, len(x), channel]
         pair_diff = x_primes[:, np.newaxis] - xs  # [len(x_primes), len(xs), channel]
-        kvalues = np.sqrt(np.sum(pair_diff**2, axis=2)/self.epsilon**2 + 1)
+        kvalues = torch.sqrt(torch.sum(pair_diff**2, axis=2)/self.epsilon**2 + 1)
         if kvalues.shape[1] == 1:
             kvalues = kvalues.squeeze(1)
         return kvalues
+
+# def mq_r(self, r):
+#     kvalues = torch.sqrt(r**2/self.epsilon**2 + 1)
+#     return kvalues
+
+# class mq(KernelFunc):
+#     def __init__(self, epsilon):
+#         self.epsilon = epsilon
+    
+#     def __call__(self, xs, x_primes):
+#         if xs.ndim == 1:
+#             xs = xs[np.newaxis, :]
+#         xs = xs[np.newaxis, :] # change to [1, len(x), channel]
+#         pair_diff = x_primes[:, np.newaxis] - xs  # [len(x_primes), len(xs), channel]
+#         kvalues = torch.sqrt(torch.sum(pair_diff**2, axis=2)
+#         if kvalues.shape[1] == 1:
+#             kvalues = kvalues.squeeze(1)
+#         return kvalues
 
 class WeightedKernel(KernelFunc):
     def __init__(self, gamma, w, p=2):
