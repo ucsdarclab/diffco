@@ -1,4 +1,6 @@
-from Fastronpp.Fastron import Fastron, Obstacle
+import sys
+sys.path.append('/home/yuheng/FastronPlus-pytorch/')
+from Fastronpp import Fastron, Obstacle, CollisionChecker
 from Fastronpp import kernel
 from matplotlib import pyplot as plt
 import numpy as np
@@ -25,7 +27,7 @@ def plot_score(checker, score, n, i, **kwargs):
     if i == 1:
         inits = torch.rand((300, 2)) * 10
         for init in inits:
-            cfg =  torch.tensor(init, dtype=torch.float32, requires_grad=True)
+            cfg = init.clone().detach().requires_grad_(True) 
             if not checker.is_collision(cfg.data.numpy()):
                 continue
             opt = torch.optim.SGD([cfg], lr=1e-2)
@@ -73,11 +75,17 @@ if __name__ == "__main__":
     # k = kernel.TangentKernel(0.8, 0)
     k = kernel.RQKernel(5)
     checker = Fastron(obstacles, kernel_func=k, beta=20)
+    gt_checker = CollisionChecker(obstacles)
 
     np.random.seed(1917)
     torch.random.manual_seed(1917)
-    checker.initialize(3000)
-    checker.train(200000, method='original')
+
+    # checker.initialize(3000)
+    # checker.train(200000, method='original')
+    cfgs = torch.rand((3000, 2)) * 10
+    labels = torch.tensor(gt_checker.predict(cfgs) * 2 - 1)
+    assert labels.max() == 1 and labels.min() == -1
+    checker.train(cfgs, labels, method='original')
     
     rbfi = Rbf(checker.support_points[:, 0].numpy(), checker.support_points[:, 1].numpy(), checker.hypothesis.numpy(), epsilon=0.7)#, epsilon=10) #checker.y) #, checker.hypothesis)
     # print(checker.support_points[:, 0], checker.support_points[:, 1], checker.hypothesis)

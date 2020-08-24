@@ -46,12 +46,34 @@ class MultiQuadratic(KernelFunc):
     def __call__(self, xs, x_primes):
         if xs.ndim == 1:
             xs = xs[np.newaxis, :]
-        xs = xs[np.newaxis, :] # change to [1, len(x), channel]
-        pair_diff = x_primes[:, np.newaxis] - xs  # [len(x_primes), len(xs), channel]
+        xs = xs[np.newaxis, :] # change shape to [1, len(x), channel]
+        pair_diff = x_primes[:, np.newaxis] - xs  # shape [len(x_primes), len(xs), channel]
         kvalues = torch.sqrt(torch.sum(pair_diff**2, axis=2)/self.epsilon**2 + 1)
         if kvalues.shape[1] == 1:
             kvalues = kvalues.squeeze(1)
         return kvalues
+
+class Polyharmonic(KernelFunc):
+    def __init__(self, k, epsilon):
+        self.epsilon = epsilon
+        if k % 2 == 0:
+            def _even_func(r):
+                tmp = (r**k * torch.log(r))
+                tmp[torch.isnan(tmp)] = 0
+                return tmp
+            self._func = _even_func
+        else:
+            self._func = lambda r: (r**k)
+    
+    def __call__(self, xs, x_primes):
+        if xs.ndim == 1:
+            xs = xs[np.newaxis, :]
+        r = torch.cdist(x_primes, xs)
+        kvalues = self._func(r) / self.epsilon
+        if kvalues.shape[1] == 1:
+            kvalues = kvalues.squeeze(1)
+        return kvalues
+        
 
 # def mq_r(self, r):
 #     kvalues = torch.sqrt(r**2/self.epsilon**2 + 1)
@@ -101,3 +123,15 @@ class TangentKernel(KernelFunc):
         if kvalues.shape[1] == 1:
             kvalues = kvalues.squeeze(1)
         return kvalues
+
+class FKKernel(KernelFunc):
+    def __init__(self, fkine, rq_kernel):
+        self.fkine = fkine
+        self.rq_kernel = rq_kernel
+    
+    def __call__(self, xs, x_primes):
+        if xs.ndim == 1:
+            xs = xs[np.newaxis, :]
+        xs_controls = self.fkine(xs).reshape(len(xs), -1)
+        x_primes_controls = self.fkine(x_primes).reshape(len(x_primes), -1)
+        return self.rq_kernel(xs_controls, x_primes_controls)

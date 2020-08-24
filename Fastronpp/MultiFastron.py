@@ -1,8 +1,8 @@
 import numpy as np
-from Fastron import CollisionChecker, Obstacle, plt
+from .Fastron import CollisionChecker, Obstacle, plt
 
 class MultiChecker:
-    def __init__(self, objects: [Obstacle,]):
+    def __init__(self, objects):
         self.objects = objects
     
     def predict(self, point):
@@ -26,7 +26,7 @@ class MultiFastron(MultiChecker):
         self.gains = np.zeros((self.num_class, num_init_points))
         K = np.tile(self.support_points[np.newaxis, :], (num_init_points, 1, 1))
         self.kernel_matrix = 1/(1+self.gamma/2*np.sum((K-K.transpose(1, 0, 2))**2, axis=2))**2
-        self.hypothesis = self.gains@self.kernel_matrix
+        self.hypothesis = torch.matmul(self.gains, self.kernel_matrix)
         self.max_n_support = 200
     
     def train(self, max_iteration=1000, method='original'):
@@ -79,7 +79,7 @@ class MultiFastron(MultiChecker):
         points = points[np.newaxis]
         pair_diff = self.support_points[:, np.newaxis] - points
         kernel_values = 1/(1+self.gamma/2*np.sum(pair_diff**2, axis=2))**2
-        scores = self.gains@kernel_values
+        scores = torch.matmul(self.gains, kernel_values)
         # kernel_values = 1/(1+self.gamma/2*np.sum((self.support_points-point)**2, axis=1))**2
         # score = self.gains@kernel_values
         return scores
@@ -88,7 +88,7 @@ class MultiFastron(MultiChecker):
         points = np.linspace(start, target, res).reshape((1, res, -1))
         pair_diff = self.support_points[:, np.newaxis] - points
         kernel_values = 1/(1+self.gamma/2*np.sum(pair_diff**2, axis=2))**2
-        scores = self.gains@kernel_values
+        scores = torch.matmul(self.gains, kernel_values)
         predicts = np.argmax(scores, axis=0)
         predicts[scores[predicts, range(len(predicts))] <= 0] = -1
         predicts += 1
