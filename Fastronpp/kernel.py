@@ -17,11 +17,11 @@ class RQKernel(KernelFunc):
     def __call__(self, xs, x_primes):
         if xs.ndim == 1:
             xs = xs[np.newaxis, :]
-        xs = xs[np.newaxis, :] # change to [1, len(x), channel]
-        pair_diff = x_primes[:, np.newaxis] - xs
+        xs = xs[:, np.newaxis] # change to [1, len(x), channel]
+        pair_diff = x_primes[np.newaxis, :] - xs
         kvalues = (1/(1+self.gamma/self.p*torch.sum(pair_diff**2, dim=2))**self.p)
-        if kvalues.shape[1] == 1:
-            kvalues = kvalues.squeeze(1)
+        if kvalues.shape[0] == 1:
+            kvalues = kvalues.squeeze_(0)
 
         return kvalues
 
@@ -32,11 +32,11 @@ class CauchyKernel(KernelFunc):
     def __call__(self, xs, x_primes):
         if xs.ndim == 1:
             xs = xs[np.newaxis, :]
-        xs = xs[np.newaxis, :] # change to [1, len(x), channel]
-        pair_diff = x_primes[:, np.newaxis] - xs
+        xs = xs[:, np.newaxis] # change to [1, len(x), channel]
+        pair_diff = x_primes[np.newaxis, :] - xs
         kvalues = self.c / (np.sum(pair_diff**2, axis=2) + self.c)
-        if kvalues.shape[1] == 1:
-            kvalues = kvalues.squeeze(1)
+        if kvalues.shape[0] == 1:
+            kvalues = kvalues.squeeze_(0)
         return kvalues
 
 class MultiQuadratic(KernelFunc):
@@ -46,11 +46,11 @@ class MultiQuadratic(KernelFunc):
     def __call__(self, xs, x_primes):
         if xs.ndim == 1:
             xs = xs[np.newaxis, :]
-        xs = xs[np.newaxis, :] # change shape to [1, len(x), channel]
-        pair_diff = x_primes[:, np.newaxis] - xs  # shape [len(x_primes), len(xs), channel]
+        xs = xs[:, np.newaxis] # change shape to [1, len(x), channel]
+        pair_diff = x_primes[np.newaxis, :] - xs  # shape [len(x_primes), len(xs), channel]
         kvalues = torch.sqrt(torch.sum(pair_diff**2, axis=2)/self.epsilon**2 + 1)
-        if kvalues.shape[1] == 1:
-            kvalues = kvalues.squeeze(1)
+        if kvalues.shape[0] == 1:
+            kvalues = kvalues.squeeze(0)
         return kvalues
 
 class Polyharmonic(KernelFunc):
@@ -68,7 +68,7 @@ class Polyharmonic(KernelFunc):
     def __call__(self, xs, x_primes):
         if xs.ndim == 1:
             xs = xs[np.newaxis, :]
-        r = torch.cdist(x_primes, xs)
+        r = torch.cdist(xs, x_primes)
         kvalues = self._func(r) / self.epsilon
         if kvalues.shape[1] == 1:
             kvalues = kvalues.squeeze(1)
@@ -102,8 +102,8 @@ class WeightedKernel(KernelFunc):
     def __call__(self, xs, x_primes):
         if xs.ndim == 1:
             xs = xs[np.newaxis, :]
-        xs = xs[np.newaxis, :] # change to [1, len(x), channel]
-        pair_diff = x_primes[:, np.newaxis] - xs # [len(x_primes), len(xs), channel]
+        xs = xs[:, np.newaxis] # change shape to [1, len(x), channel]
+        pair_diff = x_primes[np.newaxis, :] - xs  # shape [len(x_primes), len(xs), channel]
         kvalues = 1/(1+self.gamma/self.p*np.sum((pair_diff*self.w)**2, axis=2))**self.p
         if kvalues.shape[1] == 1:
             kvalues = kvalues.squeeze(1)
@@ -117,8 +117,8 @@ class TangentKernel(KernelFunc):
     def __call__(self, xs, x_primes):
         if xs.ndim == 1:
             xs = xs[np.newaxis, :]
-        xs = xs[np.newaxis, :] # change to [1, len(x), channel]
-        pair_prod = x_primes[:, np.newaxis] * xs # [len(x_primes), len(xs), channel]
+        xs = xs[:, np.newaxis] # change shape to [1, len(x), channel]
+        pair_prod = x_primes[np.newaxis, :] * xs # [len(x_primes), len(xs), channel]
         kvalues = np.tanh(self.a * np.sum(pair_prod, 2) + self.c)
         if kvalues.shape[1] == 1:
             kvalues = kvalues.squeeze(1)

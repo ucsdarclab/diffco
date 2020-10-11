@@ -1,2 +1,3 @@
 from .Fastron import *
-from . import kernel, model, MultiFastron, utils
+from .MultiFastron import *
+from . import kernel, model, utils

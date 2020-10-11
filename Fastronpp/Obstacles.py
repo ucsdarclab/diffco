@@ -7,8 +7,8 @@ class Obstacle:
         self.kind = kind
         if self.kind not in ['circle', 'rect']:
             raise NotImplementedError('Obstacle kind {} not supported'.format(kind))
-        self.position = torch.tensor(position, dtype=torch.float32)
-        self.size = torch.tensor(size, dtype=torch.float32) if kind != 'rect' or (isinstance(size, (list, tuple, np.ndarray)) and len(size) == len(position)) else torch.tensor([size, size], dtype=torch.float32)
+        self.position = torch.FloatTensor(position)
+        self.size = torch.FloatTensor(size) if kind != 'rect' or (isinstance(size, (list, tuple, np.ndarray)) and len(size) == len(position)) else torch.tensor([size, size], dtype=torch.float32)
         self.cost = cost
     
     def is_collision(self, point):
@@ -22,10 +22,16 @@ class Obstacle:
     def get_cost(self):
         return self.cost
 
-def FCLObstacle(kind, position, size):
-    if kind == 'circle':
-        position = torch.FloatTensor([position[0], position[1], 0])
-        return fcl.CollisionObject(fcl.Cylinder(size, 1000), fcl.Transform(position))
-    elif kind == 'rect':
-        position = torch.FloatTensor([position[0], position[1], 0])
-        return fcl.CollisionObject(fcl.Box(size[0], size[1], 1000), fcl.Transform(position))
+class FCLObstacle:
+    def __init__(self, shape, position, size, category=None):
+        self.size = size
+        self.position = position
+        if shape == 'circle':
+            pos_3d = torch.FloatTensor([position[0], position[1], 0])
+            self.geom = fcl.Cylinder(size, 1000)
+        elif shape == 'rect':
+            pos_3d = torch.FloatTensor([position[0], position[1], 0])
+            self.geom = fcl.Box(size[0], size[1], 1000)
+
+        self.cobj = fcl.CollisionObject(self.geom, fcl.Transform(pos_3d))
+        self.category = category

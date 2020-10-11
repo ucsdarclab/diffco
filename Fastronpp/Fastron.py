@@ -34,19 +34,6 @@ class Fastron(CollisionChecker):
         # self.gamma = self.kernel_func.gamma #C0.2 # 1/(2*self.support_points.var())
         self.beta = beta
         self.fkine = None
-    
-    def initialize(self, X, y):
-        self.support_points = X.clone()
-        self.y = y.clone()
-        num_init_points = len(X)
-        # self.support_points = torch.rand((num_init_points, 2), dtype=torch.float32) * 10
-        self.gains = torch.zeros(num_init_points)
-        # K = np.tile(self.support_points[np.newaxis, :], (num_init_points, 1, 1))
-        # self.kernel_matrix = (self.support_points@self.support_points.T+1)**2
-        # self.kernel_matrix = 1/(1+self.gamma/2*np.sum((K-K.transpose(1, 0, 2))**2, axis=2))**2
-        self.kernel_matrix = torch.zeros((num_init_points, num_init_points))
-        self.hypothesis = torch.zeros(num_init_points)
-        self.max_n_support = 200  # TODO
 
     def train(self, X, y, max_iteration=1000, method='original', distance=None):
         self.train_method = method
@@ -68,7 +55,7 @@ class Fastron(CollisionChecker):
         self.gains = self.gains[self.gains != 0]
         time_elapsed = time() - time_start
         print('{} training done. {:.4f} secs cost'.format(method, time_elapsed))
-        
+
     def train_original(self, X, y, max_iteration=1000):
         # self.y = torch.zeros(len(self.support_points))
         # for i in range(len(self.support_points)):
@@ -86,7 +73,7 @@ class Fastron(CollisionChecker):
                 delta_gain = (self.beta**((1+self.y[min_i])/2)*self.y[min_i] - self.hypothesis[min_i])/self.kernel_matrix[min_i, min_i]# 
                 # assert delta_gain > -1000 and delta_gain < 1000
                 self.gains[min_i] += delta_gain
-                assert delta_gain < 1000 and delta_gain > -1000 and self.kernel_matrix[min_i].max() < 1000
+                # assert delta_gain < 1000 and delta_gain > -1000 and self.kernel_matrix[min_i].max() < 1000
                 self.hypothesis += delta_gain * self.kernel_matrix[min_i]
                 # self.hypothesis[min_margin_idx] = self.gains @ self.kernel_matrix[:, min_margin_idx]
                 continue
@@ -104,14 +91,27 @@ class Fastron(CollisionChecker):
 
         
         print('ACC: {}'.format(torch.sum((self.hypothesis > 0) == (self.y > 0)) / float(len(self.y))))
+    
+    def initialize(self, X, y):
+        self.support_points = X.clone()
+        self.y = y.clone()
+        num_init_points = len(X)
+        # self.support_points = torch.rand((num_init_points, 2), dtype=torch.float32) * 10
+        self.gains = torch.zeros(num_init_points)
+        # K = np.tile(self.support_points[np.newaxis, :], (num_init_points, 1, 1))
+        # self.kernel_matrix = (self.support_points@self.support_points.T+1)**2
+        # self.kernel_matrix = 1/(1+self.gamma/2*np.sum((K-K.transpose(1, 0, 2))**2, axis=2))**2
+        self.kernel_matrix = torch.zeros((num_init_points, num_init_points))
+        self.hypothesis = torch.zeros(num_init_points)
+        self.max_n_support = 200  # TODO
         
     def train_sgd(self, max_iteration=1000):
         self.y = np.zeros(len(self.support_points))
         for i in range(len(self.support_points)):
             self.y[i] = 1 if self.gt_checker.is_collision(self.support_points[i]) else -1
-        y = torch.tensor(self.y)
-        K = torch.tensor(self.kernel_matrix)
-        gains = torch.tensor(self.gains, requires_grad=True)
+        y = torch.FloatTensor(self.y)
+        K = torch.FloatTensor(self.kernel_matrix)
+        gains = torch.FloatTensor(self.gains, requires_grad=True)
 
         # self.grad = self.kernel_matrix@self.y
         for it in range(max_iteration):
@@ -155,7 +155,6 @@ class Fastron(CollisionChecker):
         self.rbf_kernel = kernel.MultiQuadratic(rbfi.epsilon) if kernel_func is None else kernel_func
         kmat = self.rbf_kernel(X, X)
         self.rbf_nodes = torch.solve(y[:, None], kmat).solution.reshape(-1)
-        # print('Epsilon = {}'.format(rbfi.epsilon))
     
     def rbf_score(self, point):
         if point.ndim == 1:
@@ -165,7 +164,7 @@ class Fastron(CollisionChecker):
             supports = self.support_fkine
         else:
             supports = self.support_points
-        return torch.matmul(self.rbf_nodes, self.rbf_kernel(point, supports))
+        return torch.matmul(self.rbf_kernel(point, supports), self.rbf_nodes.unsqueeze(1))
     
     def fit_poly(self, epsilon=1, k=2, lmbd=0, target='hypo', fkine=None):
         X = self.support_points
@@ -201,11 +200,11 @@ class Fastron(CollisionChecker):
         else:
             supports = self.support_points
         phi_x = torch.cat(
-            [self.poly_kernel(point, supports).reshape((-1, len(point))), point.T, torch.ones((1, len(point)))], 
-            dim=0)
-        if phi_x.shape[1] == 1:
-            phi_x = phi_x.squeeze(1)
-        return torch.matmul(self.poly_nodes, phi_x)
+            [self.poly_kernel(point, supports), point, torch.ones(len(point), 1)], 
+            dim=1) # This needs debugging because kernel value dimension is changed in one version
+        if phi_x.shape[0] == 1:
+            phi_x = phi_x.squeeze_(0)
+        return torch.matmul(phi_x, self.poly_nodes)
 
     def is_collision(self, point):
         return self.score(point) > 0
@@ -221,7 +220,7 @@ class Fastron(CollisionChecker):
     def score_original(self, point):
         # kernel_values = 1/(1+self.gamma/2*np.sum((self.support_points-point)**2, axis=1))**2
         kernel_values = self.kernel_func(point, self.support_points)
-        score = torch.matmul(self.gains, kernel_values)
+        score = torch.matmul(kernel_values, self.gains.unsqueeze_(1))
         return score
     
     def score_nn(self, point):
