@@ -15,37 +15,75 @@ sns.set()
 import matplotlib.patheffects as path_effects
 from Fastronpp import utils
 from Fastronpp.Obstacles import FCLObstacle
+from time import time
 
 
 if __name__ == "__main__":
     # ========================== Data generqation =========================
-    obstacles = [
-        # ('circle', (3, 2), 2),
-        # ('circle', (-2, 3), 0.5),
+    env_name = '1rect_1circle_7d' # 
+    label_type = 'binary' #[instance, class, binary]
+    num_class = 2
+    DOF = 7
+
+    obstacles = {
+        # ('circle', (3, 2), 2), #2circle
+        # ('circle', (-2, 3), 0.5), #2circle
         # ('rect', (-2, 3), (1, 1)),
         # ('rect', (1.7, 3), (2, 3)),
         # ('rect', (-1.7, 3), (2, 3)),
         # ('rect', (0, -1), (10, 1)),
         # ('rect', (8, 7), 1),
-        ('rect', (4, 3), (2, 2)),
-        ('circle', (-4, -3), 1)
+        '1rect_1circle': [('rect', (4, 3), (2, 2)),
+            ('circle', (-4, -3), 1)],
+        # ('rect', (4, 3), (2, 2)), # 2rect
+        # ('rect', (-4, -3), (2, 2)) # 2rect
+        # ('rect', (3, 2), (2, 2)) # 1rect
+        '3circle': [
+            ('circle', (0, 4.5), 1), #3circle
+            ('circle', (-2, -3), 2), #3circle
+            ('circle', (-2, 2), 1.5), #3circle
+        ],
+        '1rect_1circle_7d': [
+            ('circle', (-2, 3), 1), #1rect_1circle_7d
+            ('rect', (3, 2), (2, 2)) #1rect_1circle_7d
+        ],
+        # ('rect', (5, 0), (2, 2), 0), #2class_1
+        # ('circle', (-3, 6), 1, 1), #2class_1
+        # ('rect', (-5, 2), (2, 1.5), 1), #2class_1
+        # ('circle', (-5, -2), 1.5, 1), #2class_1 
+        # ('circle', (-3, -6), 1, 1) #2class_1
+        # ('rect', (0, 3), (16, 0.5), 1), #2class_2
+        # ('rect', (0, -3), (16, 0.5), 0), #2class_2
+        # ('rect', (-7, 3), (2, 2)) #1rect_active
+        '3circle_7d': [
+            ('circle', (-2, 2), 1), #3circle_7d
+            ('circle', (-3, 3), 1), #3circle
+            ('circle', (-6, -3), 1) #3circle
         ]
+        # ('rect', (5, 4), (4, 4), 0), #2instance_big
+        # ('circle', (-5, -4), 2, 1) #2instance_big
+    }
+    obstacles = obstacles[env_name]
     fcl_obs = [FCLObstacle(*param) for param in obstacles]
     fcl_collision_obj = [fobs.cobj for fobs in fcl_obs]
     # geom2instnum = {id(g): i for i, (_, g) in enumerate(fcl_obs)}
-    env_name = '2instance'
-    label_type = 'instance' #[instance, class, binary]
-    num_class = None
-
-    DOF = 2
+    
     width = 0.3
-    link_length = 3
+    link_length = 1
     robot = RevolutePlanarRobot(link_length, width, DOF) # (7, 1), (2, 3)
 
     np.random.seed(1917)
     torch.random.manual_seed(1917)
     num_init_points = 8000
-    cfgs = 2*(torch.rand((num_init_points, DOF), dtype=torch.float32)-0.5) * np.pi
+    if 'compare' not in env_name or DOF > 2:
+        cfgs = 2*(torch.rand((num_init_points, DOF), dtype=torch.float32)-0.5) * np.pi
+    else:
+        # --- only for compare with gt distance
+        size = [400, 400]
+        yy, xx = torch.meshgrid(torch.linspace(-np.pi, np.pi, size[0]), torch.linspace(-np.pi, np.pi, size[1]))
+        cfgs = torch.stack([xx, yy], axis=2).reshape((-1, DOF))
+        num_init_points = len(cfgs)
+        # --- only for compare with gt distance
     if label_type == 'binary':
         labels = torch.zeros(num_init_points, 1, dtype=torch.float)
         dists = torch.zeros(num_init_points, 1, dtype=torch.float)
@@ -76,7 +114,10 @@ if __name__ == "__main__":
         mng.setup()
     req = fcl.CollisionRequest(num_max_contacts=1000, enable_contact=True)
     
+    times = []
+    st = time()
     for i, cfg in enumerate(cfgs):
+        st1 = time()
         robot.update_polygons(cfg)
         robot_manager.update()
         assert len(robot_manager.getObjects()) == DOF
@@ -90,11 +131,18 @@ if __name__ == "__main__":
 
             labels[i, cat] = 1 if in_collision else -1
             dists[i, cat] = depths.abs().max() if in_collision else -ddata.result.min_distance
+        end1 = time()
+        times.append(end1-st1)
+    end = time()
+    times = np.array(times)
+    print('std: {}, mean {}, avg {}'.format(times.std(), times.mean(), (end-st)/len(cfgs)))
     
     in_collision = (labels == 1).sum(1) > 0
     if label_type == 'binary':
         labels = labels.squeeze_(1)
         dists = dists.squeeze_(1)
+
+    
 
     print('{} collisons, {} free'.format(torch.sum(in_collision==1), torch.sum(in_collision==0)))
     dataset = {'data': cfgs, 'label': labels, 'dist': dists, 'obs': obstacles, 'robot': robot.__class__, 'rparam': [link_length, width, DOF, ]}

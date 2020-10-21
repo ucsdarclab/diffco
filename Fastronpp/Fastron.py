@@ -14,20 +14,18 @@ class CollisionChecker():
     def __init__(self, obstacles):
         self.obstacles = obstacles
     
-    def is_collision(self, point):
-        return any(map(lambda obs: obs.is_collision(point), self.obstacles))
+    def predict(self, point):
+        return torch.any(torch.stack([obs.is_collision(point) for obs in self.obstacles], dim=1), dim=1)
     
     def line_collision(self, start, target, res=50):
         points = map(lambda i: start + (target - start)/res*i, range(res))
         return any(map(lambda p: self.is_collision(p), points))
     
-    def predict(self, X):
-        return np.array(list(map(lambda x: self.is_collision(x), X)))
 
 
 class Fastron(CollisionChecker):
     def __init__(self, obstacles, kernel_func='rq', gamma=1, beta=1, gt_checker=None):
-        # super().__init__(obstacles)
+        super().__init__(obstacles)
         # self.gt_checker = gt_checker if gt_checker is not None else CollisionChecker(self.obstacles)
         self.train_method = None
         self.kernel_func = kernel.RQKernel(gamma) if kernel_func=='rq' else kernel_func
@@ -35,8 +33,9 @@ class Fastron(CollisionChecker):
         self.beta = beta
         self.fkine = None
 
-    def train(self, X, y, max_iteration=1000, method='original', distance=None):
+    def train(self, X, y, max_iteration=1000, method='original', distance=None, keep_all=False):
         self.train_method = method
+        self.distance = distance
         time_start = time()
         if method == 'original':
             self.train_original(X, y, max_iteration)
@@ -45,14 +44,12 @@ class Fastron(CollisionChecker):
         elif method == 'svm':
             self.train_svm()
         
-        self.support_points = self.support_points[self.gains != 0]
-        self.hypothesis = self.hypothesis[self.gains != 0]
-        self.y = self.y[self.gains != 0]
-        if distance is not None:
-            self.distance = distance[self.gains != 0]
-        else:
-            self.distance = None
-        self.gains = self.gains[self.gains != 0]
+        if not keep_all:
+            self.support_points = self.support_points[self.gains != 0]
+            self.hypothesis = self.hypothesis[self.gains != 0]
+            self.y = self.y[self.gains != 0]
+            self.distance = self.distance[self.gains != 0] if self.distance is not None else None
+            self.gains = self.gains[self.gains != 0]
         time_elapsed = time() - time_start
         print('{} training done. {:.4f} secs cost'.format(method, time_elapsed))
 
@@ -220,7 +217,7 @@ class Fastron(CollisionChecker):
     def score_original(self, point):
         # kernel_values = 1/(1+self.gamma/2*np.sum((self.support_points-point)**2, axis=1))**2
         kernel_values = self.kernel_func(point, self.support_points)
-        score = torch.matmul(kernel_values, self.gains.unsqueeze_(1))
+        score = torch.matmul(kernel_values, self.gains)#.unsqueeze_(1))
         return score
     
     def score_nn(self, point):
@@ -241,33 +238,46 @@ class Fastron(CollisionChecker):
         # return self.svm.decision_function(point.reshape(1, -1))
     
 def vis(model, size=100, seed=2019):
+    import seaborn as sns
+    sns.set()
     if isinstance(size, int):
         size = [size, size]
     yy, xx = torch.meshgrid(torch.linspace(0, 10, size[0]), torch.linspace(0, 10, size[1]))
     grid_points = torch.stack([xx, yy], axis=2).reshape((-1, 2))
-    fig, ax = plt.subplots(figsize=(28, 10)) #(figsize=(42, 10)) (14, 10) 
+    fig, ax = plt.subplots(figsize=(4, 4)) #(figsize=(42, 10)) (14, 10)
+    plt.rcParams.update({
+            "text.usetex": True,
+            "font.family": "sans-serif",
+            "font.sans-serif": ["Helvetica"]})
 
     np.random.seed(seed)
     torch.random.manual_seed(seed)
-    model.initialize(3000)
-    model.train(200000, method='original')
+
+    # model.initialize(3000)
+    X = torch.rand(8000, 2) * 10
+    gt_checker = CollisionChecker(model.obstacles)
+    Y = gt_checker.predict(X).float() * 2 - 1
+
+    model.train(X, Y, max_iteration=len(X), method='original')
     real_support_points = model.support_points
-    grid_score = np.fromiter(map(model.score_original, grid_points), np.float).reshape((size[0], size[1]))
+    grid_score = model.score(grid_points).reshape(size[0], size[1])
     # ax1 = plt.subplot(1,2,1)
-    ax1 = plt.subplot(1,2,1)
-    c = ax1.pcolormesh(xx, yy, grid_score, cmap='RdBu_r', vmin=-np.abs(grid_score).max(), vmax=np.abs(grid_score).max())
-    ax1.scatter(real_support_points[:, 0], real_support_points[:, 1], marker='.', c='black')
-    ax1.contour(xx, yy, (grid_score).astype(float), levels=0)
-    ax1.axis('equal')
-    fig.colorbar(c, ax=ax1)
-    sparse_score = grid_score[::10, ::10]
-    score_grad_x = -ndimage.sobel(sparse_score, axis=1)
-    score_grad_y = -ndimage.sobel(sparse_score, axis=0)
-    score_grad = np.stack([score_grad_x, score_grad_y], axis=2)
-    score_grad /= np.linalg.norm(score_grad, axis=2, keepdims=True)
-    score_grad_x, score_grad_y = score_grad[:, :, 0], score_grad[:, :, 1]
-    ax1.quiver(xx[::10, ::10], yy[::10, ::10], score_grad_x, score_grad_y, scale=30, color='red')
-    ax1.set_title('Original Fastron (kernel={}), no. of support points = {}'.format(model.kernel_func.__class__.__name__+str(model.kernel_func.__dict__), len(real_support_points)))
+    with sns.axes_style('ticks'):
+        ax1 = plt.subplot(1, 1, 1)
+        c = ax1.pcolormesh(xx, yy, grid_score, cmap='RdBu_r', vmin=-np.abs(grid_score).max(), vmax=np.abs(grid_score).max())
+        ax1.scatter(real_support_points[:, 0], real_support_points[:, 1], marker='.', s=3, c='black')
+        ax1.contour(xx, yy, grid_score, levels=0, linewidths=1, alpha=0.3)
+        ax1.axis('equal')
+        ax1.set_aspect('equal', adjustable='box')
+        # fig.colorbar(c, ax=ax1)
+        sparse_score = grid_score[::20, ::20]
+        score_grad_x = -ndimage.sobel(sparse_score, axis=1)
+        score_grad_y = -ndimage.sobel(sparse_score, axis=0)
+        score_grad = np.stack([score_grad_x, score_grad_y], axis=2)
+        score_grad /= np.linalg.norm(score_grad, axis=2, keepdims=True)
+        score_grad_x, score_grad_y = score_grad[:, :, 0], score_grad[:, :, 1]
+        ax1.quiver(xx[5:-5:20, ::20], yy[5:-5:20, ::20], score_grad_x, score_grad_y, width=1e-2, headwidth=2, headlength=5, color='red')
+    # ax1.set_title('Original Fastron (kernel={}), no. of support points = {}'.format(model.kernel_func.__class__.__name__+str(model.kernel_func.__dict__), len(real_support_points)))
 
     # grid_nn_score = np.fromiter(map(model.score_nn, grid_points), np.float).reshape((size[0], size[1]))
     # ax2 = plt.subplot(1,3,2)
@@ -307,12 +317,12 @@ def vis(model, size=100, seed=2019):
 
     for obs in model.obstacles:
         if obs.kind == 'circle':
-            circle_artist = plt.Circle(obs.position, radius=obs.size/2, color=[0, 0, 0, 0.3])
+            circle_artist = plt.Circle(obs.position, radius=obs.size/2, color=[0, 0, 0, 0.1])
             ax1.add_artist(circle_artist)
             # circle_artist = plt.Circle(obs.position, radius=obs.size/2, color=[0, 0, 0, 0.3])
             # ax3.add_artist(circle_artist)
         elif obs.kind == 'rect':
-            rect_artist = plt.Rectangle(obs.position-obs.size/2, obs.size[0], obs.size[1], color=[0, 0, 0, 0.3])
+            rect_artist = plt.Rectangle(obs.position-obs.size/2, obs.size[0], obs.size[1], color=[0, 0, 0, 0.1])
             ax1.add_artist(rect_artist)
             # rect_artist = plt.Rectangle(obs.position-obs.size/2, obs.size[0], obs.size[1], color=[0, 0, 0, 0.3])
             # ax3.add_artist(rect_artist)

@@ -20,11 +20,11 @@ class MultiFastron(Fastron):
     def __init__(self, objects, kernel_func='rq', gamma=1, beta=1, gt_checker=None):
         super().__init__(objects, kernel_func, gamma, beta, gt_checker)
     
-    def train(self, X, y, max_iteration=1000, method='original', distance=None):
+    def train(self, X, y, max_iteration=1000, gains=None, hypothesis=None, method='original', distance=None): #kernel_matrix=None
         self.train_method = method
         time_start = time()
         if method == 'original':
-            self.train_original(X, y, max_iteration)
+            self.train_original(X, y, max_iteration, gains, hypothesis) #, kernel_matrix
         elif method == 'sgd':
             self.train_sgd(max_iteration)
         elif method == 'svm':
@@ -32,6 +32,8 @@ class MultiFastron(Fastron):
         
         non_zero_weight_cnt = torch.sum(self.gains != 0, axis=1)
         self.support_points = self.support_points[non_zero_weight_cnt != 0]
+        self.kernel_matrix = self.kernel_matrix[non_zero_weight_cnt != 0]
+        self.kernel_matrix = self.kernel_matrix[:, non_zero_weight_cnt != 0]
         self.hypothesis = self.hypothesis[non_zero_weight_cnt != 0]
         self.y = self.y[non_zero_weight_cnt != 0]
         if distance is not None:
@@ -43,8 +45,8 @@ class MultiFastron(Fastron):
         time_elapsed = time() - time_start
         print('{} training done. {:.4f} secs cost'.format(method, time_elapsed))
 
-    def train_original(self, X, y, max_iteration=1000):
-        self.initialize(X, y)
+    def train_original(self, X, y, max_iteration=1000, gains=None, hypothesis=None): #, kernel_matrix=None):
+        self.initialize(X, y, gains=gains, hypothesis=hypothesis)# , kernel_matrix=kernel_matrix)
         complete = torch.zeros(self.num_class, dtype=torch.bool)
 
         print('MultiFastron training...')
@@ -83,21 +85,28 @@ class MultiFastron(Fastron):
     def train_svm(self):
         raise NotImplementedError
 
-    def initialize(self, X, y):
+    def initialize(self, X, y, gains=None, hypothesis=None): #, kernel_matrix=None
         self.support_points = X.clone()
         self.y = y.clone()
         num_init_points = len(X)
         self.num_class = y.shape[1]
-        self.gains = torch.zeros((num_init_points, self.num_class))
+        if gains is None and hypothesis is None:# and kernel_matrix is None:
+            self.gains = torch.zeros((num_init_points, self.num_class))
+            self.hypothesis = torch.zeros((num_init_points, self.num_class))
+        elif gains is None or hypothesis is None: # or kernel_matrix is None:
+            raise ValueError('Fastron: you passed in some existing parameters but not both of gains and hypothesis')
+        else:
+            self.gains = gains
+            self.hypothesis = hypothesis
+            # self.kernel_matrix = kernel_matrix
         self.kernel_matrix = torch.zeros((num_init_points, num_init_points))
         # self.kernel_matrix = 1/(1+self.gamma/2*np.sum((K-K.transpose(1, 0, 2))**2, axis=2))**2
-        self.hypothesis = torch.zeros((num_init_points, self.num_class))
         self.max_n_support = 200 # Not enforced, might be a TODO
     
     def predict(self, point):
         score = self.score(point)
-        max_class_idx = np.argmax(score)
-        return max_class_idx+1 if score[max_class_idx] > 0 else 0
+        # max_class_idx = np.argmax(score)
+        return (score > 0)*2-1
         # return np.argmax(self.score(point))
 
     def score(self, points):
@@ -107,7 +116,7 @@ class MultiFastron(Fastron):
         # score = self.gains@kernel_values
         return scores
 
-    def fit_rbf(self, kernel_func=None, target='hypo', fkine=None):
+    def fit_rbf(self, kernel_func=None, target='hypo', fkine=None, reg=0):
         X = self.support_points
         if fkine is not None:
             X = fkine(X).reshape([len(X), -1])
@@ -121,7 +130,20 @@ class MultiFastron(Fastron):
             y = self.y
         self.rbf_kernel = kernel.MultiQuadratic(rbfi.epsilon) if kernel_func is None else kernel_func
         kmat = self.rbf_kernel(X, X)
-        self.rbf_nodes = torch.solve(y, kmat).solution
+        min_d, min_i = (kmat+torch.eye(len(kmat)).fill_diagonal_(float('inf'))).min(dim=0)
+        plt.plot(range(len(kmat)), min_d)
+        plt.show()
+        for c in range(self.num_class):
+            c_nonzero = torch.nonzero(self.gains[:, c])
+            c_iszero = torch.nonzero(self.gains[:, c] == 0).reshape(-1)
+            assert len(c_nonzero) + len(c_iszero) == len(self.gains)
+            ridx = c_nonzero.repeat([1, len(c_iszero)]).reshape(-1)
+            cidx = c_iszero.repeat([len(c_nonzero), 1]).reshape(-1)
+            kmat[ridx, cidx] = 0
+            kmat[cidx, ridx] = 0
+        self.rbf_nodes = torch.solve(y, kmat+reg*torch.eye(len(kmat))).solution
+        for c in range(self.num_class):
+            self.rbf_nodes[self.gains == 0] = 0
         assert self.rbf_nodes.shape == (len(self.support_points), self.num_class)
     
     def rbf_score(self, point):
@@ -132,6 +154,11 @@ class MultiFastron(Fastron):
             supports = self.support_fkine
         else:
             supports = self.support_points
+        # kmat = self.rbf_kernel(point, supports)
+        # class_scores = []
+        # for c in range(self.num_class):
+        #     class_scores.append(torch.matmul(kmat[:, self.gains[:, c] != 0], self.rbf_nodes[self.gains[:, c] != 0, c]))
+        # return torch.stack(class_scores, dim=1)
         return torch.matmul(self.rbf_kernel(point, supports), self.rbf_nodes)
     
     def fit_poly(self, epsilon=1, k=2, lmbd=0, target='hypo', fkine=None):

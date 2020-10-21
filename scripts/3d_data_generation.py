@@ -21,6 +21,7 @@ import moveit_commander
 import geometry_msgs.msg
 from moveit_msgs.srv import GetStateValidityRequest, GetStateValidity
 from moveit_msgs.msg import RobotState
+from tqdm import tqdm
 
 
 
@@ -65,28 +66,28 @@ if __name__ == "__main__":
         # ('circle', (3, 2), 2),
         # ('circle', (-2, 3), 1),
         # ('rect', (-2, 3), (1, 1)),
-        ('rect', (1, 0, 0), (0.3, 0.3, 0.3)),
+        # ('rect', (1, 0, 0), (0.3, 0.3, 0.3)),
         # ('rect', (-1.7, 3), (2, 3)),
         # ('rect', (0, -1), (10, 1)),
         # ('rect', (8, 7), 1),
         ]
     box_names = []
     rospy.sleep(2)
-    for i, obs in enumerate(obstacles):
-        box_name = 'box_{}'.format(i)
-        box_names.append(box_name)
-        box_pose = geometry_msgs.msg.PoseStamped()
-        # box_pose.header.frame_id = "base"
-        box_pose.header.frame_id = robot.get_planning_frame()
-        # box_pose.pose.orientation.w = 1.0
-        box_pose.pose.position.x = obs[1][0]
-        box_pose.pose.position.y = obs[1][1]
-        box_pose.pose.position.z = obs[1][2]
-        scene.add_box(box_name, box_pose, size=obs[2])
-        wait_for_state_update(box_name, box_is_known=True)
+    # for i, obs in enumerate(obstacles):
+    #     box_name = 'box_{}'.format(i)
+    #     box_names.append(box_name)
+    #     box_pose = geometry_msgs.msg.PoseStamped()
+    #     # box_pose.header.frame_id = "base"
+    #     box_pose.header.frame_id = robot.get_planning_frame()
+    #     # box_pose.pose.orientation.w = 1.0
+    #     box_pose.pose.position.x = obs[1][0]
+    #     box_pose.pose.position.y = obs[1][1]
+    #     box_pose.pose.position.z = obs[1][2]
+    #     scene.add_box(box_name, box_pose, size=obs[2])
+    #     wait_for_state_update(box_name, box_is_known=True)
     
     
-    env_name = '1box'
+    env_name = 'medium'
 
     robot_name = 'baxter'
     DOF = 7
@@ -106,7 +107,7 @@ if __name__ == "__main__":
     gsvr = GetStateValidityRequest()
     gsvr.robot_state = rs
     gsvr.group_name = group_name
-    for i, cfg in enumerate(cfgs):
+    for i, cfg in tqdm(enumerate(cfgs)):
         rs.joint_state.position = cfg
         result = sv_srv.call(gsvr)
 
@@ -122,7 +123,7 @@ if __name__ == "__main__":
     print('{} collisons, {} free'.format(torch.sum(labels==1), torch.sum(labels==-1)))
     dataset = {'data': cfgs, 'label': labels, 'obs': obstacles, 'robot': robot.__class__}
     torch.save(dataset, '/home/yuheng/FastronPlus-pytorch/data/3d_{}_{}.pt'.format(robot_name, env_name))
-    input()
-    for box_name in box_names:
-        scene.remove_world_object(box_name)
-        wait_for_state_update(box_name, box_is_attached=False, box_is_known=False)
+    # input()
+    # for box_name in box_names:
+    #     scene.remove_world_object(box_name)
+    #     wait_for_state_update(box_name, box_is_attached=False, box_is_known=False)

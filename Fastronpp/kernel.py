@@ -63,7 +63,9 @@ class Polyharmonic(KernelFunc):
                 return tmp
             self._func = _even_func
         else:
-            self._func = lambda r: (r**k)
+            def _odd_func(r):
+                return r**k
+            self._func = _odd_func
     
     def __call__(self, xs, x_primes):
         if xs.ndim == 1:

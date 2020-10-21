@@ -7,11 +7,15 @@ import geometry_msgs.msg
 from math import pi
 from std_msgs.msg import String
 from sensor_msgs.msg import JointState
+from moveit_msgs.msg import DisplayTrajectory, RobotTrajectory
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from moveit_commander.conversions import pose_to_list
 
 import threading
+import json
 
 import sys
+import pickle
 sys.path.append('/home/yuheng/FastronPlus-pytorch/')
 from Fastronpp import Fastron
 from Fastronpp import kernel
@@ -261,23 +265,301 @@ def wait_for_state_update(scene, box_name, box_is_known=False, box_is_attached=F
     # If we exited the while loop without returning then we timed out
     return False
 
+def traj_optimize(robot, start_cfg, target_cfg, dist_est, initial_guess=None, history=False):
+    N_WAYPOINTS = 50
+    NUM_RE_TRIALS = 1 #10
+    UPDATE_STEPS = 200
+    dif_weight = 1
+    max_move_weight = 40
+    collision_weight = 20
+    joint_limit_weight = 20
+    safety_margin = -1.0
+    lr = 1e-2
+    seed = 19961221
+    torch.manual_seed(seed)
+
+    lowest_cost_solution = None
+    lowest_cost = np.inf
+    lowest_cost_trial = None
+    lowest_cost_step = None
+    best_valid_solution = None
+    best_valid_cost = np.inf
+    best_valid_step = None
+    best_valid_trial = None
+    
+    trial_histories = []
+
+    found = False
+    for trial_time in range(NUM_RE_TRIALS):
+        path_history = []
+        if trial_time == 0:
+            if initial_guess is None:
+                init_path = torch.from_numpy(np.linspace(start_cfg, target_cfg, num=N_WAYPOINTS))
+            else:
+                init_path = initial_guess
+        else:
+            init_path = (torch.rand(N_WAYPOINTS, robot.dof))*np.pi*2-np.pi
+        init_path[0] = start_cfg
+        init_path[-1] = target_cfg
+        p = init_path.requires_grad_(True)
+        opt = torch.optim.Adam([p], lr=lr)
+        # opt = torch.optim.SGD([p], lr=lr, momentum=0.0)
+
+        for step in range(UPDATE_STEPS):
+            opt.zero_grad()
+            assert p.dtype == torch.float
+            collision_score = torch.clamp(dist_est(p)-safety_margin, min=0).sum()
+            # max_move_cost = torch.clamp(
+            #     (p[1:]-p[:-1]).pow(2).sum(dim=1)-0.3**2, min=0).sum() # for rbf kernel
+            control_points = robot.fkine(p, reuse=True)
+            max_move_cost = torch.clamp(
+                (control_points[1:]-control_points[:-1]).pow(2).sum(dim=2)-0.03**2, min=0).sum()
+                # (control_points[1:, -2:-1]-control_points[:-1, -2:-1]).pow(2).sum(dim=2)-0.03**2, min=0).sum()
+            joint_limit_cost = (
+                torch.clamp(robot.limits[:, 0]-p, min=0) + torch.clamp(p-robot.limits[:, 1], min=0)).sum()
+            diff = (control_points[1:]-control_points[:-1]).pow(2).sum() + (utils.wrap2pi(p[1:]-p[:-1])).pow(2).sum()
+
+            constraint_loss = collision_weight * collision_score \
+                + max_move_weight * max_move_cost + joint_limit_weight * joint_limit_cost
+            opt_loss = dif_weight * diff
+            loss = constraint_loss + opt_loss
+            loss.backward()
+            p.grad[[0, -1]] = 0.0
+            opt.step()
+            p.data = utils.wrap2pi(p.data)
+            if history:
+                path_history.append(p.data.clone())
+            if loss.data.numpy() < lowest_cost:
+                lowest_cost = loss.data.numpy()
+                lowest_cost_solution = p.data.clone()
+                lowest_cost_step = step
+                lowest_cost_trial = trial_time
+            if constraint_loss <= 1e-2:
+                if opt_loss.data.numpy() < best_valid_cost:
+                    best_valid_cost = opt_loss.data.numpy()
+                    best_valid_solution = p.data.clone()
+                    best_valid_step = step
+                    best_valid_trial = trial_time
+            if constraint_loss <= 1e-2 or step % (UPDATE_STEPS/5) == 0 or step == UPDATE_STEPS-1:
+                print('Trial {}: Step {}, collision={:.3f}*{:.1f}, max_move={:.3f}*{:.1f}, joint_limit={:.3f}*{:.1f}, diff={:.3f}*{:.1f}, Loss={:.3f}'.format(
+                    trial_time, step, 
+                    collision_score.item(), collision_weight,
+                    max_move_cost.item(), max_move_weight,
+                    joint_limit_cost.item(), joint_limit_weight,
+                    diff.item(), dif_weight,
+                    loss.item()))
+        trial_histories.append(path_history)
+        
+        if best_valid_solution is not None:
+            found = True
+            break
+    
+    if not found:
+        print('Did not find a valid solution after {} trials!\
+            Giving the lowest cost solution'.format(NUM_RE_TRIALS))
+        solution = lowest_cost_solution
+        solution_step = lowest_cost_step
+        solution_trial = lowest_cost_trial
+    else:
+        solution = best_valid_solution
+        solution_step = best_valid_step
+        solution_trial = best_valid_trial
+    path_history = trial_histories[solution_trial] # Could be empty when history = false
+    if not path_history:
+        path_history.append(solution)
+    else:
+        path_history = path_history[:(solution_step+1)]
+    return solution, path_history, solution_trial, solution_step
+
+def animate_path(p, obstacles):
+    exp = FastronplusBaxterExperiments()
+    print('Adding box')
+    rospy.sleep(2)
+
+    box_names = []
+    for i, obs in enumerate(obstacles):
+        box_name = 'box_{}'.format(i)
+        box_names.append(box_name)
+        box_pose = geometry_msgs.msg.PoseStamped()
+        box_pose.header.frame_id = exp.planning_frame
+        # box_pose.pose.orientation.w = 1.0
+        box_pose.pose.position.x = obs[1][0]
+        box_pose.pose.position.y = obs[1][1]
+        box_pose.pose.position.z = obs[1][2]
+        exp.scene.add_box(box_name, box_pose, size=obs[2])
+        wait_for_state_update(exp.scene, box_name, box_is_known=True)
+
+    waypoint_idx = 0
+    rate = rospy.Rate(3)
+    while not rospy.is_shutdown():
+        waypoint_idx = waypoint_idx % len(p)
+        exp.go_to_joint_state(p[waypoint_idx])
+        waypoint_idx += 1
+        rate.sleep()
+    
+    return box_names, exp
+
+def single_shot(path, obstacles):
+    exp = FastronplusBaxterExperiments()
+    print('Adding box')
+    rospy.sleep(2)
+
+    box_names = []
+    # for i, obs in enumerate(obstacles):
+    #     box_name = 'box_{}'.format(i)
+    #     box_names.append(box_name)
+    #     box_pose = geometry_msgs.msg.PoseStamped()
+    #     box_pose.header.frame_id = exp.planning_frame
+    #     # box_pose.pose.orientation.w = 1.0
+    #     box_pose.pose.position.x = obs[1][0]
+    #     box_pose.pose.position.y = obs[1][1]
+    #     box_pose.pose.position.z = obs[1][2]
+    #     exp.scene.add_box(box_name, box_pose, size=obs[2])
+    #     wait_for_state_update(exp.scene, box_name, box_is_known=True)
+    
+    pub = exp.display_trajectory_publisher
+    
+    joint_traj = JointTrajectory()
+    for q in path:
+        traj_point = JointTrajectoryPoint()
+        traj_point.positions = q.numpy().tolist()
+        joint_traj.points.append(traj_point)
+    joint_traj.joint_names = ['left_s0', 'left_s1', 'left_e0', 'left_e1', 'left_w0', 'left_w1', 'left_w2']
+    robot_traj = RobotTrajectory()
+    robot_traj.joint_trajectory = joint_traj
+    disp_traj = DisplayTrajectory()
+    disp_traj.trajectory.append(robot_traj)
+    disp_traj.trajectory_start.joint_state.position = path[0].numpy()
+    disp_traj.trajectory_start.joint_state.name = joint_traj.joint_names
+    pub.publish(disp_traj)
+    
+    return box_names, exp
+
+def escape(robot, dist_est, start_cfg):
+    N_WAYPOINTS = 20
+    # NUM_RE_TRIALS = 10
+    UPDATE_STEPS = 200
+    # dif_weight = 1
+    # max_move_weight = 10
+    # collision_weight = 10
+    safety_margin = -5 #torch.FloatTensor([-2, -0.2])
+    lr = 5e-2
+    # seed = 19961221
+    # torch.manual_seed(seed)
+
+    # lowest_cost_solution = None
+    # lowest_cost = np.inf
+    # lowest_cost_trial = None
+    # lowest_cost_step = None
+    # best_valid_solution = None
+    # best_valid_cost = np.inf
+    # best_valid_step = None
+    # best_valid_trial = None
+    
+    # trial_histories = []
+
+    # found = False
+    # p = torch.FloatTensor(np.concatenate([np.linspace(start_cfg, (-np.pi, 0), N_STEPS/2), np.linspace((np.pi, 0), target_cfg, N_STEPS/2)], axis=0)).requires_grad_(True)
+    # for trial_time in range(NUM_RE_TRIALS):
+    path_history = []
+    # if trial_time == 0:
+    #     init_path = torch.from_numpy(np.linspace(start_cfg, target_cfg, num=UPDATE_STEPS))
+    # else:
+    #     init_path = (torch.rand(N_WAYPOINTS, robot.dof))*np.pi*2-np.pi
+    init_path = start_cfg
+    # init_path[-1] = target_cfg
+    p = init_path.requires_grad_(True)
+    opt = torch.optim.Adam([p], lr=lr)
+    # opt = torch.optim.SGD([p], lr=lr, momentum=0.0)
+
+    for step in range(N_WAYPOINTS):
+        if step % 1 == 0:
+            path_history.append(p.data.clone())
+
+        opt.zero_grad()
+        collision_score = dist_est(p)-safety_margin #, min=0).sum()
+        # print(torch.clamp(dist_est(p)-safety_margin, min=0).max(dim=0).values.data)
+        # control_points = robot.fkine(p)
+        # max_move_cost = torch.clamp((control_points[1:]-control_points[:-1]).pow(2).sum(dim=2)-1.0**2, min=0).sum()
+        # diff = dif_weight * (control_points[1:]-control_points[:-1]).pow(2).sum()
+        # np.clip(1.5*float(i)/UPDATE_STEPS, 0, 1)**2 (float(i)/UPDATE_STEPS) * 
+        # torch.clamp(utils.wrap2pi(p[1:]-p[:-1]).abs(), min=0.3).pow(2).sum()
+        # constraint_loss = collision_weight * collision_score + max_move_weight * max_move_cost
+        # objective_loss = dif_weight * diff
+        loss = collision_score #objective_loss + constraint_loss
+        loss.backward()
+        # p.grad[[0, -1]] = 0.0
+        opt.step()
+        p.data = utils.wrap2pi(p.data)
+        # if history:
+        
+        # if loss.data.numpy() < lowest_cost:
+        #     lowest_cost = loss.data.numpy()
+        #     lowest_cost_solution = p.data.clone()
+        #     lowest_cost_step = step
+        #     lowest_cost_trial = trial_time
+        if collision_score <= 1e-4:
+            # if objective_loss.data.numpy() < best_valid_cost:
+            #     best_valid_cost = objective_loss.data.numpy()
+            #     best_valid_solution = p.data.clone()
+            #     best_valid_step = step
+            #     best_valid_trial = trial_time
+            break
+        # if constraint_loss <= 1e-2 or step % (UPDATE_STEPS/5) == 0 or step == UPDATE_STEPS-1:
+        #     print('Trial {}: Step {}, collision={:.3f}*{:.1f}, max_move={:.3f}*{:.1f}, diff={:.3f}*{:.1f}, Loss={:.3f}'.format(
+        #         trial_time, step, 
+        #         collision_score.item(), collision_weight,
+        #         max_move_cost.item(), max_move_weight,
+        #         diff.item(), dif_weight,
+        #         loss.item()))
+        # trial_histories.append(path_history)
+        
+        # if best_valid_solution is not None:
+        #     found = True
+        #     break
+    # if not found:
+    #     print('Did not find a valid solution after {} trials!\
+    #         Giving the lowest cost solution'.format(NUM_RE_TRIALS))
+    #     solution = lowest_cost_solution
+    #     solution_step = lowest_cost_step
+    #     solution_trial = lowest_cost_trial
+    # else:
+    #     solution = best_valid_solution
+    #     solution_step = best_valid_step
+    #     solution_trial = best_valid_trial
+    # path_history = trial_histories[solution_trial] # Could be empty when history = false
+    # if not path_history:
+    #     path_history.append(solution)
+    # else:
+    #     path_history = path_history[:(solution_step+1)]
+    return torch.stack(path_history, dim=0)# sum(trial_histories, []),
+
+
 def main():
     robot_name = 'baxter'
-    env_name = '1box'
+    env_name = 'medium' #'complex' # 2objontable' # 'table'
     DOF = 7
 
-    dataset = torch.load('/home/yuheng/FastronPlus-pytorch/data/3d_{}_{}.pt'.format(robot_name, env_name))
+    dataset = torch.load('data/3d_{}_{}.pt'.format(robot_name, env_name))
     cfgs = dataset['data']
     cfgs = cfgs.type(torch.float)
     labels = dataset['label']
     # dists = dataset['dist']
     obstacles = dataset['obs']
     robot = dataset['robot']()
-    train_num = int(len(cfgs) * 0.5)
+    train_num = int(len(cfgs) * 0.9)
     fkine = robot.fkine
-    checker = Fastron(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
+    '''
+    #====
+    checker = Fastron(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(500)), beta=1.0)
     # checker = Fastron(obstacles, beta=1.0)
     checker.train(cfgs[:train_num], labels[:train_num], max_iteration=len(cfgs[:train_num]))
+    with open('results/checker.p', 'wb') as f:
+        pickle.dump(checker, f)
+        print('checker saved')
+    #====
+    with open('results/checker.p', 'rb') as f:
+        checker = pickle.load(f)
 
     # Check Fastron test ACC
     test_preds = (checker.score(cfgs[train_num:]) > 0) * 2 - 1
@@ -291,119 +573,63 @@ def main():
     Epsilon = 0.01
     checker.fit_rbf(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine) # epsilon=Epsilon,
     # checker.fit_poly(epsilon=Epsilon, target=fitting_target, fkine=fkine)
-    spline_func = checker.rbf_score
+    dist_est = checker.rbf_score
     # spline_func = checker.poly_score
-    MIN_SCORE = spline_func(cfgs[train_num:]).min().item()
+    MIN_SCORE = dist_est(cfgs[train_num:]).min().item()
     print('MIN_SCORE = {}'.format(MIN_SCORE))
-
-    # Begin optimization
-    NUM_RE_TRIALS = 10
-    N_STEPS = 20
-    seed = 2017
-    torch.manual_seed(seed)
 
     free_cfgs = cfgs[labels == -1]
     indices = torch.randint(0, len(free_cfgs), (2, ))
     while indices[0] == indices[1]:
         indices = torch.randint(0, len(free_cfgs), (2, ))
-    start_cfg = torch.FloatTensor([-39, 40, -111, 81, 4, 29, -136])/180*pi # free_cfgs[indices[0]]
-    target_cfg = torch.FloatTensor([4, 29, -86, 44, 3, 16, -146])/180*pi # free_cfgs[indices[1]]
+    # start_cfg = torch.FloatTensor([-39, 40, -111, 81, 4, 29, -136])/180*pi # free_cfgs[indices[0]]
+    start_cfg = torch.FloatTensor([25, 31, -120, 58, -66, -8, 116])/180*pi # medium scene
+    # torch.FloatTensor([5, 51, -126, 58, -66, -8, 116])/180*pi # complex scene, start below objects
+    # torch.FloatTensor([-5, 49, -146, 41, -107, -20, 168])/180*pi #2obj scene, start from left side of the objects
+    # torch.FloatTensor([-41, 27, -88, 23, -166, 67, 168])/180*pi # 2obj scene, start from between the objs
+    # torch.FloatTensor([-27, 34, -92, 34, -174, -50, -19]) /180*pi #start from high-risk (basic scene)
+    target_cfg = torch.FloatTensor([-48, 59, -147, 50, -170, -30, 169])/180*pi #complex scene, end below objects; medium scene
+    # target_cfg = torch.FloatTensor([-22, 28, -87, 45, -170, -30, 169])/180*pi #2obj scene, stop on the right of the objects
+    # torch.FloatTensor([13, 31, -88, 16, -160, -27, 169])/180*pi # 2obj scene, stop beside table
+    # torch.FloatTensor([4, 29, -86, 44, 3, 16, -146])/180*pi
+    
+    with open('data/medium_success_2.json', 'r') as f:
+        init_guess = torch.FloatTensor(json.load(f)['path'])
+    p, path_history, num_trial, num_step = traj_optimize(robot, start_cfg, target_cfg, dist_est, init_guess, history=True)
 
-    found = False
-    for trial_time in range(NUM_RE_TRIALS):
-        if trial_time == 0:
-            p = torch.from_numpy(np.linspace(start_cfg, target_cfg, num=N_STEPS))
-        else:
-            torch.manual_seed(seed)
-            seed += 1
-            # p = torch.FloatTensor(np.concatenate([np.linspace(start_cfg, (-np.pi, 0), N_STEPS/2), np.linspace((np.pi, 0), target_cfg, N_STEPS/2)], axis=0)).requires_grad_(True)
-            p = (torch.rand(N_STEPS, DOF, dtype=torch.float))*(robot.limits[:, 1]-robot.limits[:, 0]) + robot.limits[:, 0]
-        p[0] = start_cfg
-        p[-1] = target_cfg
-        p.requires_grad_(True)
-        lr = 1e-2
-        opt = torch.optim.Adam([p], lr=lr)
+    # p, path_history, num_trial, num_step = traj_optimize(robot, start_cfg, target_cfg, dist_est, history=True)
+    with open('results/path_3d_{}_{}.json'.format(robot_name, env_name), 'w') as f:
+        json.dump(
+            {
+                'path': p.data.numpy().tolist(), 
+                'path_history': [tmp.data.numpy().tolist() for tmp in path_history],
+                'trial': num_trial,
+                'step': num_step
+            },
+            f, indent=1)
+        print('Plan recorded in {}'.format(f.name))
+    # p = escape(robot, dist_est, start_cfg)
+    '''
 
-        UPDATE_STEPS = 400
-        dif_weight = 5
-        max_move_weight = 10
-        collision_weight = 10
-        joint_limit_weight = 10
-
-        for step in range(UPDATE_STEPS):
-            opt.zero_grad()
-            assert p.dtype == torch.float
-            collision_score = torch.clamp(spline_func(p)-(MIN_SCORE/5), min=0).sum()
-            # max_move_cost = torch.clamp(
-            #     (p[1:]-p[:-1]).pow(2).sum(dim=1)-0.3**2, min=0).sum() # for rbf kernel
-            control_points = fkine(p, reuse=True)
-            max_move_cost = torch.clamp(
-                (control_points[1:, -2:-1]-control_points[:-1, -2:-1]).pow(2).sum(dim=2)-0.5**2, min=0).sum()
-            joint_limit_cost = (
-                torch.clamp(robot.limits[:, 0]-p, min=0) + torch.clamp(p-robot.limits[:, 1], min=0)).sum()
-            diff = (control_points[1:, -2:-1]-control_points[:-1, -2:-1]).pow(2).sum() + (utils.wrap2pi(p[1:]-p[:-1])).pow(2).sum()
-
-            constraint_loss = collision_weight * collision_score + max_move_weight * max_move_cost + joint_limit_weight * joint_limit_cost
-            opt_loss = dif_weight * diff
-            loss = constraint_loss + opt_loss
-            loss.backward()
-            p.grad[[0, -1]] = 0.0
-            opt.step()
-            p.data = utils.wrap2pi(p.data)
-            if constraint_loss <= 1e-2 or step % (UPDATE_STEPS/5) == 0 or step == UPDATE_STEPS-1:
-                print('Trial {}: Step {}, collision={:.3f}*{:.1f}, max_move={:.3f}*{:.1f}, joint_limit={:.3f}*{:.1f}, diff={:.3f}*{:.1f}, Loss={:.3f}'.format(
-                    trial_time, step, 
-                    collision_score.item(), collision_weight,
-                    max_move_cost.item(), max_move_weight,
-                    joint_limit_cost.item(), joint_limit_weight,
-                    diff.item(), dif_weight,
-                    loss.item()))
-                # if constraint_loss <= 1e-2:
-                #     break
-        if constraint_loss <= 1e-2:
-            found = True
-            break
-    if not found:
-        print('Did not find a valid solution after {} trials!'.format(NUM_RE_TRIALS))
+    # with open('results/path_3d_{}_{}.json'.format(robot_name, env_name), 'r') as f:
+    #     p = torch.FloatTensor(json.load(f)['path'])
+    with open('data/medium_success_2.json', 'r') as f:
+        p = torch.FloatTensor(json.load(f)['path'])
 
     try:
         raw_input = input
     except NameError:
         pass
     try:
-        print("")
-        print("----------------------------------------------------------")
-        print("Welcome to the MoveIt MoveGroup Python Interface Tutorial")
-        print("----------------------------------------------------------")
         print("Press Ctrl-D to exit at any time")
         print("")
         print("============ Press `Enter` to visualize the path generated")
         raw_input()
-        exp = FastronplusBaxterExperiments()
-        print('Adding box')
-        rospy.sleep(2)
 
         box_names = []
-        for i, obs in enumerate(obstacles):
-            box_name = 'box_{}'.format(i)
-            box_names.append(box_name)
-            box_pose = geometry_msgs.msg.PoseStamped()
-            box_pose.header.frame_id = exp.planning_frame
-            # box_pose.pose.orientation.w = 1.0
-            box_pose.pose.position.x = obs[1][0]
-            box_pose.pose.position.y = obs[1][1]
-            box_pose.pose.position.z = obs[1][2]
-            exp.scene.add_box(box_name, box_pose, size=obs[2])
-            wait_for_state_update(exp.scene, box_name, box_is_known=True)
-    
-        waypoint_idx = 0
-        rate = rospy.Rate(3)
-        while not rospy.is_shutdown():
-            waypoint_idx = waypoint_idx % N_STEPS
-            exp.go_to_joint_state(p[waypoint_idx])
-            waypoint_idx += 1
-            rate.sleep()
-        
+        # box_names, exp = animate_path(p, obstacles)
+        box_names, exp = single_shot(p, obstacles)
+
     except rospy.ROSInterruptException:
         pass
     except KeyboardInterrupt:
