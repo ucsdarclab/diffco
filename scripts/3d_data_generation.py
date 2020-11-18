@@ -87,7 +87,7 @@ if __name__ == "__main__":
     #     wait_for_state_update(box_name, box_is_known=True)
     
     
-    env_name = 'medium'
+    env_name = '2objontable'
 
     robot_name = 'baxter'
     DOF = 7

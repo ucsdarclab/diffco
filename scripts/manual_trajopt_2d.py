@@ -24,7 +24,7 @@ def traj_optimize(robot, dist_est, start_cfg, target_cfg, history=False):
     dif_weight = 1
     max_move_weight = 10
     collision_weight = 10
-    safety_margin = torch.FloatTensor([-0.8, -0.8]) #-3, 
+    safety_margin = torch.FloatTensor([-8.0, -0.8]) #
     lr = 5e-1
     seed = 19961221
     torch.manual_seed(seed)
@@ -111,6 +111,7 @@ def traj_optimize(robot, dist_est, start_cfg, target_cfg, history=False):
     else:
         path_history = path_history[:(solution_step+1)]
     return solution, path_history, solution_trial, solution_step # sum(trial_histories, []),
+
 
 
 def animation_demo(robot, p, fig, link_plot, joint_plot, eff_plot, cfg_path_plots=None, path_history=None, save_dir=None):
@@ -413,8 +414,8 @@ def escape(robot, dist_est, start_cfg):
     return torch.stack(path_history, dim=0)# sum(trial_histories, []),
 
 def main():
-    DOF = 3
-    env_name = '2class_1' # '2rect' # '1rect_1circle' '1rect' 'narrow' '2instance'
+    DOF = 2
+    env_name = '2instance' # '2rect' # '1rect_1circle' '1rect' 'narrow' '2instance'
 
     dataset = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name))
     cfgs = dataset['data']
@@ -447,6 +448,9 @@ def main():
     # dist_est = checker.poly_score
     print('MIN_SCORE = {:.6f}'.format(dist_est(cfgs[train_num:]).min()))
 
+
+    # return # DEBUGGING
+
     cfg_path_plots = []
     if robot.dof > 2:
         fig, ax, link_plot, joint_plot, eff_plot = create_plots(robot, obstacles, dist_est, checker)
@@ -462,10 +466,10 @@ def main():
     #     indices = torch.randint(0, len(free_cfgs), (2, ))
     start_cfg = torch.zeros(robot.dof, dtype=torch.float32) # free_cfgs[indices[0]] # 
     target_cfg = torch.zeros(robot.dof, dtype=torch.float32) # free_cfgs[indices[1]] # 
-    start_cfg[0] = np.pi/2 #-np.pi/16 #  #-np.pi/4 #  #0 # # # 
-    start_cfg[1] = -np.pi/6
-    target_cfg[0] = -np.pi/2 # -15*np.pi/16 #  #3*np.pi/4 #  #np.pi# # # 
-    target_cfg[1] = np.pi/5
+    start_cfg[0] = -np.pi/4 #np.pi/2 #-np.pi/16 #  # #  #0 # # # 
+    # start_cfg[1] = -np.pi/6
+    target_cfg[0] = 3*np.pi/4 #-np.pi/2 # -15*np.pi/16 #  # #  #np.pi# # # 
+    # target_cfg[1] = np.pi/5
 
     p, path_history, num_trial, num_step = traj_optimize(
         robot, dist_est, start_cfg, target_cfg, history=True)
@@ -500,9 +504,9 @@ def main():
 
     # single shot
     single_plot(robot, p, fig, link_plot, joint_plot, eff_plot, cfg_path_plots=cfg_path_plots, ax=ax)
-    # plt.show()
+    plt.show()
     # plt.savefig('figs/path_2d_{}dof_{}.png'.format(robot.dof, env_name), dpi=500)
-    plt.savefig('figs/2d_{}dof_{}_equalmargin'.format(robot.dof, env_name), dpi=500) #_equalmargin.png
+    # plt.savefig('figs/2d_{}dof_{}_equalmargin'.format(robot.dof, env_name), dpi=500) #_equalmargin.png
     
     
 

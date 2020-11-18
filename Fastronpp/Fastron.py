@@ -94,12 +94,12 @@ class Fastron(CollisionChecker):
         self.y = y.clone()
         num_init_points = len(X)
         # self.support_points = torch.rand((num_init_points, 2), dtype=torch.float32) * 10
-        self.gains = torch.zeros(num_init_points)
+        self.gains = torch.zeros(num_init_points, dtype=X.dtype)
         # K = np.tile(self.support_points[np.newaxis, :], (num_init_points, 1, 1))
         # self.kernel_matrix = (self.support_points@self.support_points.T+1)**2
         # self.kernel_matrix = 1/(1+self.gamma/2*np.sum((K-K.transpose(1, 0, 2))**2, axis=2))**2
-        self.kernel_matrix = torch.zeros((num_init_points, num_init_points))
-        self.hypothesis = torch.zeros(num_init_points)
+        self.kernel_matrix = torch.zeros((num_init_points, num_init_points), dtype=X.dtype)
+        self.hypothesis = torch.zeros(num_init_points, dtype=X.dtype)
         self.max_n_support = 200  # TODO
         
     def train_sgd(self, max_iteration=1000):
@@ -151,7 +151,9 @@ class Fastron(CollisionChecker):
             y = self.y
         self.rbf_kernel = kernel.MultiQuadratic(rbfi.epsilon) if kernel_func is None else kernel_func
         kmat = self.rbf_kernel(X, X)
+
         self.rbf_nodes = torch.solve(y[:, None], kmat).solution.reshape(-1)
+        # print(kmat@self.rbf_nodes) # DEBUG
     
     def rbf_score(self, point):
         if point.ndim == 1:
@@ -349,4 +351,13 @@ if __name__ == '__main__':
     # lambda x, x_prime: -k(x, x_prime)+k(np.array([0, 0]), np.array([[10, 10]]))
     checker = Fastron(obstacles, kernel_func=k, beta=20)
     vis(checker, 200, seed=1917)
+    ax.bar(x+itm*w, [np.mean(stats_by_obsnum[k][n][m] if k != 'cost' or stats_by_obsnum['success'][n][m] == []\
+         else stats_by_obsnum[k][n][m][stats_by_obsnum['success'][n][m]]) for n in obsnums], width=w, \
+             yerr=None if k == 'success' else \
+                 ([np.min(stats_by_obsnum[k][n][m] if k != 'cost' \
+                     else stats_by_obsnum[k][n][m][stats_by_obsnum['success'][n][m]])\
+                          if stats_by_obsnum['success'][n][m] != [] else None for n in obsnums], \
+                  [np.max(stats_by_obsnum[k][n][m] if k != 'cost' \
+                      else stats_by_obsnum[k][n][m][stats_by_obsnum['success'][n][m]])\
+                          if stats_by_obsnum['success'][n][m] != [] else None for n in obsnums]), capsize=2, label=m)
  

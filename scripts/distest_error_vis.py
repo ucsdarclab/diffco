@@ -129,7 +129,7 @@ def main(DOF, env_name):
     train_num = 6000
     indices = torch.LongTensor(np.random.choice(len(cfgs), train_num, replace=False))
     fkine = robot.fkine
-    checker = Fastron(obstacles, kernel.RQKernel(10), beta=1.0) #kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10))
+    checker = Fastron(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0) #
     # checker = MultiFastron(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
     keep_all = False
     if 'compare' not in env_name:
@@ -150,9 +150,9 @@ def main(DOF, env_name):
 
     fitting_target = 'label' # {label, dist, hypo}
     Epsilon = 0.01
-    checker.fit_rbf(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target)#, fkine=fkine) # epsilon=Epsilon,
+    checker.fit_rbf(kernel_func=kernel.Polyharmonic(3, Epsilon), target=fitting_target, fkine=fkine) # epsilon=Epsilon,
     # checker.fit_rbf(kernel_func=kernel.MultiQuadratic(Epsilon), target=fitting_target, fkine=fkine)
-    # checker.fit_poly(epsilon=Epsilon, target=fitting_target, fkine=fkine, lmbd=10)
+    # checker.fit_poly(epsilon=Epsilon, target=fitting_target, fkine=fkine) #, lmbd=10)
     dist_est = checker.rbf_score
     #  = checker.score
     # dist_est = checker.poly_score
@@ -209,8 +209,8 @@ def main(DOF, env_name):
     # ax.spines['left'].set_position('center')
     # ax.spines['bottom'].set_position('center')
     # ax.
-    # plt.show()
-    plt.savefig('figs/correlation/{}dof_{}_{}-nofk.pdf'.format(DOF, env_name, fitting_target))#, dpi=500)
+    plt.show()
+    # plt.savefig('figs/correlation/{}dof_{}_{}.pdf'.format(DOF, env_name, fitting_target))#, dpi=500)
     # ''' 
 
     ''' timing

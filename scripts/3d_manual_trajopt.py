@@ -268,12 +268,12 @@ def wait_for_state_update(scene, box_name, box_is_known=False, box_is_attached=F
 def traj_optimize(robot, start_cfg, target_cfg, dist_est, initial_guess=None, history=False):
     N_WAYPOINTS = 50
     NUM_RE_TRIALS = 1 #10
-    UPDATE_STEPS = 200
-    dif_weight = 1
-    max_move_weight = 40
-    collision_weight = 20
-    joint_limit_weight = 20
-    safety_margin = -1.0
+    UPDATE_STEPS = 400
+    dif_weight = 5
+    max_move_weight = 10
+    collision_weight = 10
+    joint_limit_weight = 10
+    safety_margin = -1
     lr = 1e-2
     seed = 19961221
     torch.manual_seed(seed)
@@ -314,10 +314,11 @@ def traj_optimize(robot, start_cfg, target_cfg, dist_est, initial_guess=None, hi
             control_points = robot.fkine(p, reuse=True)
             max_move_cost = torch.clamp(
                 (control_points[1:]-control_points[:-1]).pow(2).sum(dim=2)-0.03**2, min=0).sum()
-                # (control_points[1:, -2:-1]-control_points[:-1, -2:-1]).pow(2).sum(dim=2)-0.03**2, min=0).sum()
+                # (control_points[1:, -2:-1]-control_points[:-1, -2:-1]).pow(2).sum(dim=2)-0.5**2, min=0).sum()
             joint_limit_cost = (
                 torch.clamp(robot.limits[:, 0]-p, min=0) + torch.clamp(p-robot.limits[:, 1], min=0)).sum()
             diff = (control_points[1:]-control_points[:-1]).pow(2).sum() + (utils.wrap2pi(p[1:]-p[:-1])).pow(2).sum()
+            # diff = (control_points[1:, -2:-1]-control_points[:-1, -2:-1]).pow(2).sum() + (utils.wrap2pi(p[1:]-p[:-1])).pow(2).sum()
 
             constraint_loss = collision_weight * collision_score \
                 + max_move_weight * max_move_cost + joint_limit_weight * joint_limit_cost
@@ -537,7 +538,7 @@ def escape(robot, dist_est, start_cfg):
 
 def main():
     robot_name = 'baxter'
-    env_name = 'medium' #'complex' # 2objontable' # 'table'
+    env_name = '2objontable' #'complex' # 2objontable' # 'table'
     DOF = 7
 
     dataset = torch.load('data/3d_{}_{}.pt'.format(robot_name, env_name))
@@ -547,16 +548,16 @@ def main():
     # dists = dataset['dist']
     obstacles = dataset['obs']
     robot = dataset['robot']()
-    train_num = int(len(cfgs) * 0.9)
+    train_num = int(len(cfgs) * 0.5)
     fkine = robot.fkine
-    '''
+    # '''
     #====
-    checker = Fastron(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(500)), beta=1.0)
-    # checker = Fastron(obstacles, beta=1.0)
-    checker.train(cfgs[:train_num], labels[:train_num], max_iteration=len(cfgs[:train_num]))
-    with open('results/checker.p', 'wb') as f:
-        pickle.dump(checker, f)
-        print('checker saved')
+    # checker = Fastron(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
+    # # checker = Fastron(obstacles, beta=1.0)
+    # checker.train(cfgs[:train_num], labels[:train_num], max_iteration=len(cfgs[:train_num]))
+    # with open('results/checker.p', 'wb') as f:
+    #     pickle.dump(checker, f)
+    #     print('checker saved')
     #====
     with open('results/checker.p', 'rb') as f:
         checker = pickle.load(f)
@@ -583,22 +584,24 @@ def main():
     while indices[0] == indices[1]:
         indices = torch.randint(0, len(free_cfgs), (2, ))
     # start_cfg = torch.FloatTensor([-39, 40, -111, 81, 4, 29, -136])/180*pi # free_cfgs[indices[0]]
-    start_cfg = torch.FloatTensor([25, 31, -120, 58, -66, -8, 116])/180*pi # medium scene
+    start_cfg = torch.FloatTensor([-41, 27, -88, 23, -166, 67, 168])/180*pi # 2obj scene, start from between the objs
+    # torch.FloatTensor([25, 31, -120, 58, -66, -8, 116])/180*pi # medium scene
     # torch.FloatTensor([5, 51, -126, 58, -66, -8, 116])/180*pi # complex scene, start below objects
     # torch.FloatTensor([-5, 49, -146, 41, -107, -20, 168])/180*pi #2obj scene, start from left side of the objects
-    # torch.FloatTensor([-41, 27, -88, 23, -166, 67, 168])/180*pi # 2obj scene, start from between the objs
+    # 
     # torch.FloatTensor([-27, 34, -92, 34, -174, -50, -19]) /180*pi #start from high-risk (basic scene)
-    target_cfg = torch.FloatTensor([-48, 59, -147, 50, -170, -30, 169])/180*pi #complex scene, end below objects; medium scene
-    # target_cfg = torch.FloatTensor([-22, 28, -87, 45, -170, -30, 169])/180*pi #2obj scene, stop on the right of the objects
-    # torch.FloatTensor([13, 31, -88, 16, -160, -27, 169])/180*pi # 2obj scene, stop beside table
+    target_cfg = torch.FloatTensor([13, 31, -88, 16, -160, -27, 169])/180*pi # 2obj scene, stop beside table
+    # torch.FloatTensor([-48, 59, -147, 50, -170, -30, 169])/180*pi #complex scene, end below objects; medium scene
+    # torch.FloatTensor([-22, 28, -87, 45, -170, -30, 169])/180*pi #2obj scene, stop on the right of the objects
+    # 
     # torch.FloatTensor([4, 29, -86, 44, 3, 16, -146])/180*pi
     
-    with open('data/medium_success_2.json', 'r') as f:
+    with open('data/{}_success_1.json'.format(env_name), 'r') as f:
         init_guess = torch.FloatTensor(json.load(f)['path'])
     p, path_history, num_trial, num_step = traj_optimize(robot, start_cfg, target_cfg, dist_est, init_guess, history=True)
 
     # p, path_history, num_trial, num_step = traj_optimize(robot, start_cfg, target_cfg, dist_est, history=True)
-    with open('results/path_3d_{}_{}.json'.format(robot_name, env_name), 'w') as f:
+    with open('results/path_3d_{}_{}_2.json'.format(robot_name, env_name), 'w') as f:
         json.dump(
             {
                 'path': p.data.numpy().tolist(), 
@@ -609,12 +612,12 @@ def main():
             f, indent=1)
         print('Plan recorded in {}'.format(f.name))
     # p = escape(robot, dist_est, start_cfg)
-    '''
+    # '''
 
     # with open('results/path_3d_{}_{}.json'.format(robot_name, env_name), 'r') as f:
     #     p = torch.FloatTensor(json.load(f)['path'])
-    with open('data/medium_success_2.json', 'r') as f:
-        p = torch.FloatTensor(json.load(f)['path'])
+    # with open('data/medium_success_2.json', 'r') as f:
+    #     p = torch.FloatTensor(json.load(f)['path'])
 
     try:
         raw_input = input

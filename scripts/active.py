@@ -16,6 +16,7 @@ sns.set()
 import matplotlib.patheffects as path_effects
 from Fastronpp import utils
 from Fastronpp.Obstacles import FCLObstacle
+from Fastronpp.FCLChecker import FCLChecker
 
 def traj_optimize(robot, dist_est, start_cfg, target_cfg, history=False):
     N_WAYPOINTS = 20
@@ -522,33 +523,6 @@ def escape(robot, dist_est, start_cfg):
     #     path_history = path_history[:(solution_step+1)]
     return torch.stack(path_history, dim=0)# sum(trial_histories, []),
 
-class FCLChecker(CollisionChecker):
-    def __init__(self, obstacles, robot, robot_manager, obs_managers):
-        super().__init__(obstacles)
-        self.robot = robot
-        self.robot_manager = robot_manager
-        self.obs_managers = obs_managers
-    
-    def predict(self, X):
-        labels = torch.FloatTensor(len(X), len(self.obs_managers))
-        dists = torch.FloatTensor(len(X), len(self.obs_managers))
-        req = fcl.CollisionRequest(num_max_contacts=1000, enable_contact=True)
-        for i, cfg in enumerate(X):
-            self.robot.update_polygons(cfg)
-            self.robot_manager.update()
-            assert len(self.robot_manager.getObjects()) == self.robot.dof
-            for cat, obs_mng in enumerate(self.obs_managers):
-                rdata = fcl.CollisionData(request = req)
-                self.robot_manager.collide(obs_mng, rdata, fcl.defaultCollisionCallback)
-                in_collision = rdata.result.is_collision
-                ddata = fcl.DistanceData()
-                self.robot_manager.distance(obs_mng, ddata, fcl.defaultDistanceCallback)
-                depths = torch.FloatTensor([c.penetration_depth for c in rdata.result.contacts])
-
-                labels[i, cat] = 1 if in_collision else -1
-                dists[i, cat] = depths.abs().max() if in_collision else -ddata.result.min_distance
-        return labels, dists
-
 def main():
     DOF = 2
     env_name = '1rect_active' # '2rect' # '1rect_1circle' '1rect' 'narrow' '2instance'
@@ -580,8 +554,8 @@ def main():
     checker.fit_rbf(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine) # epsilon=Epsilon,
     # checker.fit_rbf(kernel_func=kernel.MultiQuadratic(Epsilon), target=fitting_target, fkine=fkine)
     # checker.fit_poly(epsilon=Epsilon, target=fitting_target, fkine=fkine, lmbd=10)
-    # dist_est = checker.rbf_score
-    dist_est = checker.score
+    dist_est = checker.rbf_score
+    # dist_est = checker.score
     # dist_est = checker.poly_score
     print('MIN_SCORE = {:.6f}'.format(dist_est(cfgs[train_num:]).min()))
 
@@ -593,7 +567,7 @@ def main():
     num_class = 1
 
     T = 11
-    nu = 0 #5
+    nu = 5 #5
     kai = 4000
     sigma = 0.3
     seed = 19961202
@@ -648,6 +622,7 @@ def main():
 
         cfgs = torch.cat([exploit_samples, explore_samples, checker.support_points])
         labels, dists = gt_checker.predict(cfgs)
+        print('Collision {}, Free {}\n'.format((labels == 1).sum(), (labels==-1).sum()))
 
         gains = torch.cat([torch.zeros(len(exploit_samples)+len(explore_samples), checker.num_class), checker.gains]) #None # 
         #TODO: bug: not calculating true hypothesis for new points
@@ -657,6 +632,7 @@ def main():
         # kernel_matrix[-len(checker.kernel_matrix):, -len(checker.kernel_matrix):] = checker.kernel_matrix
 
         checker.train(cfgs, labels, gains=gains, hypothesis=hypothesis, distance=dists) #, kernel_matrix=kernel_matrix
+        print('Num of support points {}'.format(len(checker.support_points)))
         checker.fit_rbf(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine, reg=0.1)
 
         print('t = {}'.format(t))
@@ -706,7 +682,7 @@ def main():
             single_plot(robot, p, fig, link_plot, joint_plot, eff_plot, cfg_path_plots=cfg_path_plots, ax=ax)
             plt.show()
             # plt.savefig('figs/path_2d_{}dof_{}.png'.format(robot.dof, env_name), dpi=500)
-            plt.savefig('figs/active_2d_{}dof_{}_{}'.format(robot.dof, env_name, t), dpi=500) #_equalmargin.png
+            # plt.savefig('figs/active_2d_{}dof_{}_{}'.format(robot.dof, env_name, t), dpi=500) #_equalmargin.png
     
     
 

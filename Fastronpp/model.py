@@ -12,19 +12,19 @@ class Model():
         raise NotImplementedError
 
 class RevolutePlanarRobot(Model):
-    def __init__(self, length, link_width, dof=None, limits=None):
+    def __init__(self, link_length, link_width, dof=None, limits=None):
         if limits is None:
             limits = [-np.pi, np.pi]
         if dof is None:
-            dof = len(length)
-        if isinstance(length, (int, float)):
-            length = [length] * dof
+            dof = len(link_length)
+        if isinstance(link_length, (int, float)):
+            link_length = [link_length] * dof
         if len(limits) == 2 and isinstance(limits[0], (int, float)):
             limits = [limits] * dof
-        assert len(limits) == dof and len(length) == dof
+        assert len(limits) == dof and len(link_length) == dof
         self.dof = dof
         self.link_width = link_width
-        self.length = torch.FloatTensor(length)
+        self.link_length = torch.FloatTensor(link_length)
         self.limits = torch.FloatTensor(limits)
         self.collision_objs = None
 
@@ -33,27 +33,27 @@ class RevolutePlanarRobot(Model):
         q = torch.cumsum(q, dim=1)
         c = torch.cos(q)
         s = torch.sin(q)
-        x = torch.cumsum(self.length * c, dim=1)
-        y = torch.cumsum(self.length * s, dim=1)
+        x = torch.cumsum(self.link_length * c, dim=1)
+        y = torch.cumsum(self.link_length * s, dim=1)
         controls = torch.stack([x, y], dim=2)
         return controls
     
     @torch.no_grad()
     def update_polygons(self, q):
         joints = self.fkine(q)[0]
-        joints = torch.cat([torch.zeros(1, 2), joints], dim=0)
+        joints = torch.cat([torch.zeros(1, 2, dtype=joints.dtype), joints], dim=0)
         centers = (joints[:-1] + joints[1:])/2
         q = torch.reshape(q, (-1, self.dof))
         angles = torch.cumsum(q, dim=1)[0]
         if self.collision_objs is None:
             self.collision_objs = []
-            for trans, angle, l in zip(centers, angles, self.length):
+            for trans, angle, l in zip(centers, angles, self.link_length):
                 obj = fcl.Box(l, self.link_width, 1000)
                 self.collision_objs.append(fcl.CollisionObject(obj, fcl.Transform(
                     Rotation.from_rotvec([0, 0, angle]).as_quat()[[3,0,1,2]], 
                     [trans[0], trans[1], 0])))
         else:
-            for obj, trans, angle, l in zip(self.collision_objs, centers, angles, self.length):
+            for obj, trans, angle, l in zip(self.collision_objs, centers, angles, self.link_length):
                 obj.setTransform(fcl.Transform(
                     Rotation.from_rotvec([0, 0, angle]).as_quat()[[3,0,1,2]], 
                     [trans[0], trans[1], 0]))

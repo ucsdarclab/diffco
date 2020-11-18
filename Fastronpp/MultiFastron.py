@@ -130,9 +130,12 @@ class MultiFastron(Fastron):
             y = self.y
         self.rbf_kernel = kernel.MultiQuadratic(rbfi.epsilon) if kernel_func is None else kernel_func
         kmat = self.rbf_kernel(X, X)
-        min_d, min_i = (kmat+torch.eye(len(kmat)).fill_diagonal_(float('inf'))).min(dim=0)
-        plt.plot(range(len(kmat)), min_d)
-        plt.show()
+        print(X.shape)
+        print(kmat.shape)
+
+        # min_d, min_i = (kmat+torch.eye(len(kmat)).fill_diagonal_(float('inf'))).min(dim=0)
+        # plt.plot(range(len(kmat)), min_d)
+        # plt.show()
         for c in range(self.num_class):
             c_nonzero = torch.nonzero(self.gains[:, c])
             c_iszero = torch.nonzero(self.gains[:, c] == 0).reshape(-1)
