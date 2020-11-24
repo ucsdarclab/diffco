@@ -119,7 +119,7 @@ def FastronClustering(cfgs, fkine, c_ax):
     c_ax.pcolormesh(xx, yy, preds, cmap='Set1', shading='gouraud', vmin=-0.5, vmax=numClusters-0.5,  alpha=0.05)
     c_ax.grid(False, visible=False)
 
-def main(DOF, env_name):
+def main(DOF, env_name, lmbda=10):
     dataset = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name))
     cfgs = dataset['data']
     labels = dataset['label']
@@ -129,7 +129,7 @@ def main(DOF, env_name):
     train_num = 6000
     indices = torch.LongTensor(np.random.choice(len(cfgs), train_num, replace=False))
     fkine = robot.fkine
-    checker = Fastron(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0) #
+    checker = Fastron(obstacles, kernel_func=kernel.RQKernel(lmbda), beta=1.0) # TODO: kernel.FKKernel(fkine, 
     # checker = MultiFastron(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
     keep_all = False
     if 'compare' not in env_name:
@@ -150,19 +150,19 @@ def main(DOF, env_name):
 
     fitting_target = 'label' # {label, dist, hypo}
     Epsilon = 0.01
-    checker.fit_rbf(kernel_func=kernel.Polyharmonic(3, Epsilon), target=fitting_target, fkine=fkine) # epsilon=Epsilon,
+    checker.fit_rbf(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target) #, fkine=fkine) # epsilon=Epsilon, 
     # checker.fit_rbf(kernel_func=kernel.MultiQuadratic(Epsilon), target=fitting_target, fkine=fkine)
     # checker.fit_poly(epsilon=Epsilon, target=fitting_target, fkine=fkine) #, lmbd=10)
     dist_est = checker.rbf_score
     #  = checker.score
     # dist_est = checker.poly_score
 
-    ''' 3-figure compare (work, c space 1, c space 2)
+    ''' ==================3-figure compare (work, c space 1, c space 2)==========
     size = [400, 400]
     env_name_gt = env_name if 'compare' in env_name else env_name+'_for_compare'
-    gt_grid = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name_gt))['dist']
+    # gt_grid = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name_gt))['dist']
     # grid_points = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name_gt))['data']
-    # raw_grid_score = checker.score(grid_points)
+    raw_grid_score = checker.score(grid_points)
 
     est, c_axes = create_plots(robot, obstacles, dist_est, gt_grid) # raw_grid_score)#gt_grid)
     plt.show()
@@ -187,6 +187,7 @@ def main(DOF, env_name):
     gt_grid = gt_grid[train_num:]
     # est_grid = est_grid[indices]
 
+    # ''' plot
     fig = plt.figure(figsize=(5, 5)) # temp
     plt.rcParams.update({
         "text.usetex": True,
@@ -209,8 +210,18 @@ def main(DOF, env_name):
     # ax.spines['left'].set_position('center')
     # ax.spines['bottom'].set_position('center')
     # ax.
-    plt.show()
+
+    from scipy import stats
+    slope, intercept, r_value, p_value, std_err = stats.linregress(est_grid.numpy().reshape(-1), gt_grid.numpy().reshape(-1))
+    print('{}DOF, environment {}, with FK {}, r-squared: {}'.format(DOF, env_name, checker.fkine is not None, r_value**2))
+    ax.text(xlim_max/4, -7*ylim_max/8, '$\\mathrm{R}^2='+('{:.4f}$'.format(r_value**2)), fontsize=15, 
+        bbox=dict(boxstyle='round', facecolor='wheat', alpha=1))#, fontdict={"family": "Times New Roman",})
+
+    # plt.show()
     # plt.savefig('figs/correlation/{}dof_{}_{}.pdf'.format(DOF, env_name, fitting_target))#, dpi=500)
+    plt.savefig('figs/correlation/{}dof_{}_{}_{}_rsquare.png'.format(DOF, env_name, fitting_target, 'woFK' if checker.fkine is None else 'withFK'), dpi=300)
+    # '''
+    
     # ''' 
 
     ''' timing
@@ -234,6 +245,7 @@ def main(DOF, env_name):
     FastronClustering(cfgs, fkine, c_axes[0])
     plt.show()
     '''
+    return r_value ** 2
     
     
 
@@ -241,8 +253,8 @@ def main(DOF, env_name):
 
 
 if __name__ == "__main__":
-    DOF = 2
-    env_name = '1rect' # '2rect' # '1rect_1circle' '1rect' 'narrow' '2instance' 3circle
+    # DOF = 2
+    # env_name = '1rect' # '2rect' # '1rect_1circle' '1rect' 'narrow' '2instance' 3circle
     envs = [
         (2, '1rect'),
         (2, '3circle'),
@@ -251,3 +263,16 @@ if __name__ == "__main__":
     ]
     for DOF, env_name in envs:
         main(DOF, env_name)
+    # lmbdas = np.power(10, np.arange(-1, 3, step=0.1))
+    # rs = []
+    # for DOF, env_name in envs:
+    #     for lmbda in lmbdas:
+    #         rs.append(main(DOF, env_name, lmbda))
+    # plt.plot(lmbdas, rs)
+    # plt.xticks(lmbdas)
+    # plt.yticks(rs)
+    # plt.show()
+    # with open('rvalue_tests.json', 'w') as f:
+    #     json.dump(
+    #         {'lambda': lmbdas.tolist(),
+    #         'rvalues': rs}, f)

@@ -24,7 +24,7 @@ def traj_optimize(robot, dist_est, start_cfg, target_cfg, history=False):
     dif_weight = 1
     max_move_weight = 10
     collision_weight = 10
-    safety_margin = torch.FloatTensor([-8.0, -0.8]) #
+    safety_margin = torch.FloatTensor([-12, -1.2])#([-8.0, -0.8]) #
     lr = 5e-1
     seed = 19961221
     torch.manual_seed(seed)
@@ -112,8 +112,6 @@ def traj_optimize(robot, dist_est, start_cfg, target_cfg, history=False):
         path_history = path_history[:(solution_step+1)]
     return solution, path_history, solution_trial, solution_step # sum(trial_histories, []),
 
-
-
 def animation_demo(robot, p, fig, link_plot, joint_plot, eff_plot, cfg_path_plots=None, path_history=None, save_dir=None):
     global opt, start_frame, cnt_down
     FPS = 15
@@ -183,7 +181,7 @@ def create_plots(robot, obstacles, dist_est, checker):
     elif robot.dof == 2:
         # Show C-space at the same time
         num_class = getattr(checker, 'num_class', 1)
-        fig = plt.figure(figsize=(3*(num_class + 1)+0.5, 3 * num_class))
+        fig = plt.figure(figsize=(3*(num_class + 1), 3 * num_class))
         gs = fig.add_gridspec(num_class, num_class+1)
         ax = fig.add_subplot(gs[:, :-1]) #sum([list(range(r*(num_class+1)+1, (r+1)*(num_class+1))) for r in range(num_class)], [])) #, projection='3d'
         cfg_path_plots = []
@@ -203,7 +201,8 @@ def create_plots(robot, obstacles, dist_est, checker):
                 color_mesh = c_ax.pcolormesh(xx, yy, score, cmap=cmaps[cat], vmin=-torch.abs(score).max(), vmax=torch.abs(score).max())
                 c_support_points = checker.support_points[checker.gains[:, cat] != 0]
                 c_ax.scatter(c_support_points[:, 0], c_support_points[:, 1], marker='.', c='black', s=1.5)
-                c_ax.contour(xx, yy, score, levels=[0], linewidths=1, alpha=0.4, ) #-1.5, -0.75, 0, 0.3
+                contour_plot = c_ax.contour(xx, yy, score, levels=[-18, -10, 0, 3.5 if cat==0 else 2.5], linewidths=1, alpha=0.4, colors='k') #-1.5, -0.75, 0, 0.3
+                ax.clabel(contour_plot, inline=1, fmt='%.1f', fontsize=8)
                 # fig.colorbar(color_mesh, ax=c_ax)
                 # sparse_score = score[5:-5:10, 5:-5:10]
                 # score_grad_x = -ndimage.sobel(sparse_score.numpy(), axis=1)
@@ -222,9 +221,9 @@ def create_plots(robot, obstacles, dist_est, checker):
                 c_ax.set_xlim(-np.pi, np.pi)
                 c_ax.set_ylim(-np.pi, np.pi)
                 c_ax.set_xticks([-np.pi, 0, np.pi])
-                c_ax.set_xticklabels(['$-\pi$', '$0$', '$\pi$'])
+                c_ax.set_xticklabels(['$-\pi$', '$0$', '$\pi$'], fontsize=18)
                 c_ax.set_yticks([-np.pi, 0, np.pi])
-                c_ax.set_yticklabels(['$-\pi$', '$0$', '$\pi$'])
+                c_ax.set_yticklabels(['$-\pi$', '$0$', '$\pi$'], fontsize=18)
                 # c_ax.tick_params(direction='in', reset=True)
                 # c_ax.tick_params(which='both', direction='out', length=6, width=2, colors='r',
                 #    grid_color='r', grid_alpha=0.5)
@@ -237,6 +236,7 @@ def create_plots(robot, obstacles, dist_est, checker):
     ax.set_aspect('equal', adjustable='box')
     ax.set_xticks([-4, 0, 4])
     ax.set_yticks([-4, 0, 4])
+    ax.tick_params(labelsize=18)
     for obs in obstacles:
         cat = obs[3] if len(obs) >= 4 else 1
         print('{}, cat {}, {}'.format(obs[0], cat, obs))
@@ -296,20 +296,20 @@ def single_plot(robot, p, fig, link_plot, joint_plot, eff_plot, cfg_path_plots=N
     #         if torch.sum(torch.abs(segments[i]) > np.pi) == 2:
 
 
-    for cfg_path in cfg_path_plots:
-        cfg_path.set_data(p[:, 0], p[:, 1])
+    # for cfg_path in cfg_path_plots:
+    #     cfg_path.set_data(p[:, 0], p[:, 1])
 
     # ---------Just for making a figure------------
-    # segments = [p[:-3], p[-3:]]
-    # d1 = segments[0][-1, 0]-(-np.pi)
-    # d2 = np.pi - segments[1][0, 0]
-    # dh = segments[1][0, 1] - segments[0][-1, 1]
-    # intery = segments[0][-1, 1] + dh/(d1+d2)*d1
-    # segments[0] = torch.cat([segments[0], torch.FloatTensor([[-np.pi, intery]])])
-    # segments[1] = torch.cat([torch.FloatTensor([[np.pi, intery]]), segments[1]])
-    # for cfg_path in cfg_path_plots:
-    #     for seg in segments:
-    #         cfg_path.axes.plot(seg[:, 0], seg[:, 1], '-o', c='olivedrab', alpha=0.5, markersize=3)
+    segments = [p[:-3], p[-3:]]
+    d1 = segments[0][-1, 0]-(-np.pi)
+    d2 = np.pi - segments[1][0, 0]
+    dh = segments[1][0, 1] - segments[0][-1, 1]
+    intery = segments[0][-1, 1] + dh/(d1+d2)*d1
+    segments[0] = torch.cat([segments[0], torch.FloatTensor([[-np.pi, intery]])])
+    segments[1] = torch.cat([torch.FloatTensor([[np.pi, intery]]), segments[1]])
+    for cfg_path in cfg_path_plots:
+        for seg in segments:
+            cfg_path.axes.plot(seg[:, 0], seg[:, 1], '-o', c='olivedrab', alpha=0.5, markersize=3)
     # ---------------------------------------------
 
     # plt.show()
@@ -423,6 +423,7 @@ def main():
     dists = dataset['dist'] #.reshape(-1, 1) #.max(1).values
     obstacles = dataset['obs']
     obstacles = [obs+(i, ) for i, obs in enumerate(obstacles)]
+    print(obstacles)
     robot = dataset['robot'](*dataset['rparam'])
     width = robot.link_width
     train_num = 6000
@@ -471,8 +472,8 @@ def main():
     target_cfg[0] = 3*np.pi/4 #-np.pi/2 # -15*np.pi/16 #  # #  #np.pi# # # 
     # target_cfg[1] = np.pi/5
 
-    p, path_history, num_trial, num_step = traj_optimize(
-        robot, dist_est, start_cfg, target_cfg, history=True)
+    # p, path_history, num_trial, num_step = traj_optimize(
+    #     robot, dist_est, start_cfg, target_cfg, history=True)
     # with open('results/path_2d_{}dof_{}.json'.format(robot.dof, env_name), 'w') as f:
     #     json.dump(
     #         {
@@ -487,10 +488,10 @@ def main():
     # with open('results/esc_2d_{}dof_{}.json'.format(robot.dof, env_name), 'w') as f:
     #     json.dump({'path': p.data.numpy().tolist(), },f, indent=1)
     #     print('Plan recorded in {}'.format(f.name))
-    # with open('results/path_2d_{}dof_{}.json'.format(robot.dof, env_name), 'r') as f:
-    #     path_dict = json.load(f)
-    #     p = torch.FloatTensor(path_dict['path'])
-    #     path_history = [torch.FloatTensor(shot) for shot in path_dict['path_history']] #[p] #
+    with open('results/path_2d_{}dof_{}.json'.format(robot.dof, env_name), 'r') as f:
+        path_dict = json.load(f)
+        p = torch.FloatTensor(path_dict['path'])
+        path_history = [torch.FloatTensor(shot) for shot in path_dict['path_history']] #[p] #
     
     #animation
     # vid_name = None #'results/maual_trajopt_2d_{}dof_{}_fitting_{}_eps_{}_dif_{}_updates_{}_steps_{}.mp4'.format(
@@ -504,9 +505,12 @@ def main():
 
     # single shot
     single_plot(robot, p, fig, link_plot, joint_plot, eff_plot, cfg_path_plots=cfg_path_plots, ax=ax)
-    plt.show()
+    # plt.show()
     # plt.savefig('figs/path_2d_{}dof_{}.png'.format(robot.dof, env_name), dpi=500)
     # plt.savefig('figs/2d_{}dof_{}_equalmargin'.format(robot.dof, env_name), dpi=500) #_equalmargin.png
+
+    plt.tight_layout()
+    plt.savefig('figs/opening_contourline.png', dpi=500, bbox_inches='tight')
     
     
 

@@ -538,7 +538,7 @@ def escape(robot, dist_est, start_cfg):
 
 def main():
     robot_name = 'baxter'
-    env_name = '2objontable' #'complex' # 2objontable' # 'table'
+    env_name = 'catontable' #'2objontable' #'complex' # 2objontable' # 'table'
     DOF = 7
 
     dataset = torch.load('data/3d_{}_{}.pt'.format(robot_name, env_name))
@@ -552,15 +552,16 @@ def main():
     fkine = robot.fkine
     # '''
     #====
-    # checker = Fastron(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
-    # # checker = Fastron(obstacles, beta=1.0)
-    # checker.train(cfgs[:train_num], labels[:train_num], max_iteration=len(cfgs[:train_num]))
-    # with open('results/checker.p', 'wb') as f:
-    #     pickle.dump(checker, f)
-    #     print('checker saved')
+    checker = Fastron(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
+    # checker = Fastron(obstacles, beta=1.0)
+    checker.train(cfgs[:train_num], labels[:train_num], max_iteration=len(cfgs[:train_num]))
+    with open('results/checker_3d_{}_{}.p'.format(robot_name, env_name), 'wb') as f:
+        pickle.dump(checker, f)
+        print('checker saved: {}'.format(f.name))
     #====
-    with open('results/checker.p', 'rb') as f:
+    with open('results/checker_3d_{}_{}.p'.format(robot_name, env_name), 'rb') as f:
         checker = pickle.load(f)
+        print('checker loaded: {}'.format(f.name))
 
     # Check Fastron test ACC
     test_preds = (checker.score(cfgs[train_num:]) > 0) * 2 - 1
@@ -584,10 +585,11 @@ def main():
     while indices[0] == indices[1]:
         indices = torch.randint(0, len(free_cfgs), (2, ))
     # start_cfg = torch.FloatTensor([-39, 40, -111, 81, 4, 29, -136])/180*pi # free_cfgs[indices[0]]
-    start_cfg = torch.FloatTensor([-41, 27, -88, 23, -166, 67, 168])/180*pi # 2obj scene, start from between the objs
+    # start_cfg = torch.FloatTensor([-41, 27, -88, 23, -166, 67, 168])/180*pi # 2obj scene, start from between the objs
     # torch.FloatTensor([25, 31, -120, 58, -66, -8, 116])/180*pi # medium scene
     # torch.FloatTensor([5, 51, -126, 58, -66, -8, 116])/180*pi # complex scene, start below objects
     # torch.FloatTensor([-5, 49, -146, 41, -107, -20, 168])/180*pi #2obj scene, start from left side of the objects
+    start_cfg = torch.FloatTensor([-11, -1, -64, 60, 11, 36, 147])/180*pi # medium scene
     # 
     # torch.FloatTensor([-27, 34, -92, 34, -174, -50, -19]) /180*pi #start from high-risk (basic scene)
     target_cfg = torch.FloatTensor([13, 31, -88, 16, -160, -27, 169])/180*pi # 2obj scene, stop beside table
@@ -596,22 +598,29 @@ def main():
     # 
     # torch.FloatTensor([4, 29, -86, 44, 3, 16, -146])/180*pi
     
-    with open('data/{}_success_1.json'.format(env_name), 'r') as f:
-        init_guess = torch.FloatTensor(json.load(f)['path'])
-    p, path_history, num_trial, num_step = traj_optimize(robot, start_cfg, target_cfg, dist_est, init_guess, history=True)
+    # with open('data/{}_success_1.json'.format(env_name), 'r') as f:
+    #     init_guess = torch.FloatTensor(json.load(f)['path'])
+    # p, path_history, num_trial, num_step = traj_optimize(robot, start_cfg, target_cfg, dist_est, init_guess, history=True)
 
     # p, path_history, num_trial, num_step = traj_optimize(robot, start_cfg, target_cfg, dist_est, history=True)
-    with open('results/path_3d_{}_{}_2.json'.format(robot_name, env_name), 'w') as f:
+    # with open('results/path_3d_{}_{}_2.json'.format(robot_name, env_name), 'w') as f:
+    #     json.dump(
+    #         {
+    #             'path': p.data.numpy().tolist(), 
+    #             'path_history': [tmp.data.numpy().tolist() for tmp in path_history],
+    #             'trial': num_trial,
+    #             'step': num_step
+    #         },
+    #         f, indent=1)
+    #     print('Plan recorded in {}'.format(f.name))
+    p = escape(robot, dist_est, start_cfg)
+    with open('results/path_3d_{}_{}_escape.json'.format(robot_name, env_name), 'w') as f:
         json.dump(
             {
                 'path': p.data.numpy().tolist(), 
-                'path_history': [tmp.data.numpy().tolist() for tmp in path_history],
-                'trial': num_trial,
-                'step': num_step
             },
             f, indent=1)
         print('Plan recorded in {}'.format(f.name))
-    # p = escape(robot, dist_est, start_cfg)
     # '''
 
     # with open('results/path_3d_{}_{}.json'.format(robot_name, env_name), 'r') as f:

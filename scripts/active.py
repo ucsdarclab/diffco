@@ -1,5 +1,7 @@
 import sys
 import json
+from os.path import join, isdir, isfile
+from os import makedirs
 sys.path.append('/home/yuheng/FastronPlus-pytorch/')
 from Fastronpp import Fastron, MultiFastron, CollisionChecker
 from Fastronpp import kernel
@@ -20,7 +22,7 @@ from Fastronpp.FCLChecker import FCLChecker
 
 def traj_optimize(robot, dist_est, start_cfg, target_cfg, history=False):
     N_WAYPOINTS = 20
-    NUM_RE_TRIALS = 10
+    NUM_RE_TRIALS = 5
     UPDATE_STEPS = 200
     dif_weight = 1
     max_move_weight = 10
@@ -325,8 +327,9 @@ def create_plots(robot, obstacles, dist_est, checker):
                 # c_ax.quiver(xx[5:-5:10, 5:-5:10], yy[5:-5:10, 5:-5:10], score_grad_x, score_grad_y, color='red', width=2e-3, headwidth=2, headlength=5)
                 # cfg_point = Circle(collision_cfgs[0], radius=0.05, facecolor='orange', edgecolor='black', path_effects=[path_effects.withSimplePatchShadow()])
                 # c_ax.add_patch(cfg_point)
-                cfg_path, = c_ax.plot([], [], '-o', c='orange', markersize=3)
-                cfg_path_plots.append(cfg_path)
+                for _ in range(4):
+                    cfg_path, = c_ax.plot([], [], '-o', c='orange', markersize=3)
+                    cfg_path_plots.append(cfg_path)
 
                 c_ax.set_aspect('equal', adjustable='box')
                 # c_ax.axis('equal')
@@ -405,9 +408,9 @@ def single_plot(robot, p, fig, link_plot, joint_plot, eff_plot, cfg_path_plots=N
     #     for i in range(len(segments)-1):
     #         if torch.sum(torch.abs(segments[i]) > np.pi) == 2:
 
-
-    for cfg_path in cfg_path_plots:
-        cfg_path.set_data(p[:, 0], p[:, 1])
+    offset = torch.FloatTensor([[0, 0], [0, 1], [-1, 1], [-1, 0]]) * np.pi*2
+    for i, cfg_path in enumerate(cfg_path_plots):
+        cfg_path.set_data(p[:, 0]+offset[i%4, 0], p[:, 1]+offset[i%4, 1])
 
     # ---------Just for making a figure------------
     # segments = [p[:-3], p[-3:]]
@@ -570,11 +573,10 @@ def main():
     nu = 5 #5
     kai = 4000
     sigma = 0.3
-    seed = 19961202
+    seed = 1918
     torch.manual_seed(seed)
-
-    np.random.seed(1917)
-    torch.random.manual_seed(1917)
+    np.random.seed(seed)
+    
     num_init_points = 8000
     if label_type == 'binary':
         obs_managers = [fcl.DynamicAABBTreeCollisionManager()]
@@ -648,7 +650,8 @@ def main():
             # Begin optimization
             # p, path_history, num_trial, num_step = traj_optimize(
             #     robot, dist_est, start_cfg, target_cfg, history=False)
-            # with open('results/path_2d_{}dof_{}.json'.format(robot.dof, env_name), 'w') as f:
+            path_dir = 'results/active_learning/path_2d_{}dof_{}_seed{}_step{:02d}.json'.format(robot.dof, env_name, seed, t)
+            # with open(path_dir, 'w') as f:
             #     json.dump(
             #         {
             #             'path': p.data.numpy().tolist(), 
@@ -658,14 +661,13 @@ def main():
             #         },
             #         f, indent=1)
             #     print('Plan recorded in {}'.format(f.name))
-            # p = escape(robot, dist_est, start_cfg)
-            # with open('results/esc_2d_{}dof_{}.json'.format(robot.dof, env_name), 'w') as f:
-            #     json.dump({'path': p.data.numpy().tolist(), },f, indent=1)
-            #     print('Plan recorded in {}'.format(f.name))
-            # with open('results/path_2d_{}dof_{}.json'.format(robot.dof, env_name), 'r') as f:
-            #     path_dict = json.load(f)
-            #     p = torch.FloatTensor(path_dict['path'])
-            #     path_history = [torch.FloatTensor(shot) for shot in path_dict['path_history']] #[p] #
+            if not isfile(path_dir):
+                continue
+            with open(path_dir, 'r') as f:
+                path_dict = json.load(f)
+                p = torch.FloatTensor(path_dict['path'])
+                p = utils.make_continue(p)
+                path_history = [torch.FloatTensor(shot) for shot in path_dict['path_history']] #[p] #
             
             #animation
             # vid_name = None #'results/maual_trajopt_2d_{}dof_{}_fitting_{}_eps_{}_dif_{}_updates_{}_steps_{}.mp4'.format(
@@ -678,11 +680,14 @@ def main():
             #     animation_demo(robot, p, fig, link_plot, joint_plot, eff_plot, save_dir=vid_name)
 
             # single shot
-            p = torch.zeros(20, robot.dof)
             single_plot(robot, p, fig, link_plot, joint_plot, eff_plot, cfg_path_plots=cfg_path_plots, ax=ax)
-            plt.show()
+            # plt.show()
             # plt.savefig('figs/path_2d_{}dof_{}.png'.format(robot.dof, env_name), dpi=500)
-            # plt.savefig('figs/active_2d_{}dof_{}_{}'.format(robot.dof, env_name, t), dpi=500) #_equalmargin.png
+            # plt.savefig('figs/active_2d_{}dof_{}_{}'.format(robot.dof, env_name, t), dpi=500)
+            fig_dir = 'figs/active/{}'.format(seed)
+            if not isdir(fig_dir):
+                makedirs(fig_dir)
+            plt.savefig(join(fig_dir, '2d_{}dof_{}_{}_refined'.format(robot.dof, env_name, t)), dpi=300)
     
     
 

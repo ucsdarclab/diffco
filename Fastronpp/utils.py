@@ -16,6 +16,14 @@ def anglin(q1, q2, num=50, endpoint=True):
     dq = torch.from_numpy(np.linspace(np.zeros_like(q1), wrap2pi(q2-q1), num, endpoint))
     return wrap2pi(q1 + dq)
 
+def make_continue(q, max_gap=np.pi):
+    q = torch.FloatTensor(q)
+    sudden_change = torch.zeros_like(q)
+    sudden_change[1:] = (torch.abs(q[1:]-q[:-1]) > max_gap) * torch.sign(q[1:]-q[:-1])
+    offset = -torch.cumsum(sudden_change, dim=0) * np.pi*2
+    return q + offset
+    
+
 
 if __name__ == "__main__":
     # x = np.linspace(-8*np.pi, 8*np.pi, 1000)

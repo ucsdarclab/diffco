@@ -7,3 +7,4 @@ run_image.bash
 data/*/
 figs/
 *.png
+.ipynb_checkpoints/
