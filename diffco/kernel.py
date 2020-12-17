@@ -137,3 +137,37 @@ class FKKernel(KernelFunc):
         xs_controls = self.fkine(xs).reshape(len(xs), -1)
         x_primes_controls = self.fkine(x_primes).reshape(len(x_primes), -1)
         return self.rq_kernel(xs_controls, x_primes_controls)
+
+class LineKernel(KernelFunc):
+    def __init__(self, point_kernel):
+        self.point_kernel = point_kernel
+    
+    def __call__(self, xs, x_primes):
+        if xs.ndim == 1:
+            xs = xs[np.newaxis, :]
+        if x_primes.ndim == 1:
+            x_primes = x_primes[np.newaxis, :]
+        twice_DOF = xs.shape[1]
+        assert twice_DOF == x_primes.shape[1]
+        assert twice_DOF%2 == 0
+        dof = twice_DOF // 2
+        return (self.point_kernel(xs[:, :dof], x_primes[:, :dof])\
+            + self.point_kernel(xs[:, dof:], x_primes[:, dof:]))/2
+
+class LineFKKernel(KernelFunc):
+    def __init__(self, fkine, rq_kernel):
+        self.fkine = fkine
+        self.rq_kernel = rq_kernel
+    
+    def __call__(self, xs, x_primes):
+        if xs.ndim == 1:
+            xs = xs[np.newaxis, :]
+        if x_primes.ndim == 1:
+            x_primes = x_primes[np.newaxis, :]
+        twice_DOF = xs.shape[1]
+        assert twice_DOF == x_primes.shape[1]
+        assert twice_DOF % 2 == 0
+        dof = twice_DOF // 2
+        xs_controls = self.fkine(xs.reshape(-1, dof)).reshape(len(xs), -1)
+        x_primes_controls = self.fkine(x_primes.reshape(-1, dof)).reshape(len(x_primes), -1)
+        return self.rq_kernel(xs_controls, x_primes_controls)

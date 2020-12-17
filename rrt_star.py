@@ -2,8 +2,8 @@ import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.collections import LineCollection
 from mlxtend.plotting import plot_decision_regions
-from Fastron import *
-from MultiFastron import *
+from DiffCo import *
+from MultiDiffCo import *
 
 def euclidean_dist(a, b):
     return np.linalg.norm(a-b)
@@ -222,7 +222,7 @@ if __name__ == '__main__':
     obstacles = [Obstacle(*param) for param in obstacles]
     print(obstacles)
     # obstacles = []
-    checker = MultiFastron(obstacles, len(obstacles), gamma=0.2)
+    checker = MultiDiffCo(obstacles, len(obstacles), gamma=0.2)
     checker.train(10000)
     # checker.vis()
     planner = RRT_STAR((0, 0), (10, 10), (10, 10), obstacles, radius_local_planner)#, euclidean_dist, rewire=True)
@@ -231,7 +231,7 @@ if __name__ == '__main__':
     planner.dist_func = planner.score_dist
     planner.vis_cost()
     # print(planner.plan(500, animate_interval=500))
-    # checker = Fastron(obstacles)
+    # checker = DiffCo(obstacles)
     
     # plt.axis('equal')
     # plt.xlim((0, 10))

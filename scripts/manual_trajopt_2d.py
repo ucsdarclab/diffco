@@ -1,12 +1,12 @@
 import sys
 import json
-sys.path.append('/home/yuheng/FastronPlus-pytorch/')
-from Fastronpp import Fastron, MultiFastron
-from Fastronpp import kernel
+sys.path.append('/home/yuheng/DiffCo/')
+from diffco import DiffCo, MultiDiffCo
+from diffco import kernel
 from matplotlib import pyplot as plt
 import numpy as np
 import torch
-from Fastronpp.model import RevolutePlanarRobot
+from diffco.model import RevolutePlanarRobot
 import fcl
 from scipy import ndimage
 from matplotlib import animation
@@ -14,8 +14,8 @@ from matplotlib.patches import Rectangle, FancyBboxPatch, Circle
 import seaborn as sns
 sns.set()
 import matplotlib.patheffects as path_effects
-from Fastronpp import utils
-from Fastronpp.Obstacles import FCLObstacle
+from diffco import utils
+from diffco.Obstacles import FCLObstacle
 
 def traj_optimize(robot, dist_est, start_cfg, target_cfg, history=False):
     N_WAYPOINTS = 20
@@ -195,8 +195,8 @@ def create_plots(robot, obstacles, dist_est, checker):
             for cat in range(num_class):
                 c_ax = fig.add_subplot(gs[cat, -1])
 
-                # score_fastron = checker.score(grid_points).reshape(size)
-                # score = (torch.sign(score_fastron)+1)/2*(score_spline-score_spline.min()) + (-torch.sign(score_fastron)+1)/2*(score_spline-score_spline.max())
+                # score_DiffCo = checker.score(grid_points).reshape(size)
+                # score = (torch.sign(score_DiffCo)+1)/2*(score_spline-score_spline.min()) + (-torch.sign(score_DiffCo)+1)/2*(score_spline-score_spline.max())
                 score = score_spline[:, :, cat]
                 color_mesh = c_ax.pcolormesh(xx, yy, score, cmap=cmaps[cat], vmin=-torch.abs(score).max(), vmax=torch.abs(score).max())
                 c_support_points = checker.support_points[checker.gains[:, cat] != 0]
@@ -428,11 +428,11 @@ def main():
     width = robot.link_width
     train_num = 6000
     fkine = robot.fkine
-    # checker = Fastron(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
-    checker = MultiFastron(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
+    # checker = DiffCo(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
+    checker = MultiDiffCo(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
     checker.train(cfgs[:train_num], labels[:train_num], max_iteration=len(cfgs[:train_num]), distance=dists[:train_num])
 
-    # Check Fastron test ACC
+    # Check DiffCo test ACC
     test_preds = (checker.score(cfgs[train_num:]) > 0) * 2 - 1
     test_acc = torch.sum(test_preds == labels[train_num:], dtype=torch.float32)/len(test_preds.view(-1))
     test_tpr = torch.sum(test_preds[labels[train_num:]==1] == 1, dtype=torch.float32) / len(test_preds[labels[train_num:]==1])

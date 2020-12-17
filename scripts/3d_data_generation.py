@@ -1,11 +1,11 @@
 import sys
-sys.path.append('/home/yuheng/FastronPlus-pytorch/')
-from Fastronpp import Fastron
-from Fastronpp import kernel
+sys.path.append('/home/yuheng/DiffCo/')
+from diffco import DiffCo
+from diffco import kernel
 from matplotlib import pyplot as plt
 import numpy as np
 import torch
-from Fastronpp.model import BaxterFK
+from diffco.model import BaxterFK
 # import fcl
 # from scipy import ndimage
 # from matplotlib import animation
@@ -13,8 +13,8 @@ from Fastronpp.model import BaxterFK
 # import seaborn as sns
 # sns.set()
 # import matplotlib.patheffects as path_effects
-# from Fastronpp import utils
-# from Fastronpp.Obstacles import FCLObstacle
+# from diffco import utils
+# from diffco.Obstacles import FCLObstacle
 
 import rospy
 import moveit_commander
@@ -28,7 +28,7 @@ from tqdm import tqdm
 
 if __name__ == "__main__":
     moveit_commander.roscpp_initialize(sys.argv)
-    rospy.init_node('FastronplusDataGenerator', anonymous=True)
+    rospy.init_node('DiffCoplusDataGenerator', anonymous=True)
     robot = moveit_commander.RobotCommander()
     scene = moveit_commander.PlanningSceneInterface()
     group_name = "left_arm"
@@ -122,7 +122,7 @@ if __name__ == "__main__":
         #     dists[i] = -ddata.result.min_distance
     print('{} collisons, {} free'.format(torch.sum(labels==1), torch.sum(labels==-1)))
     dataset = {'data': cfgs, 'label': labels, 'obs': obstacles, 'robot': robot.__class__}
-    torch.save(dataset, '/home/yuheng/FastronPlus-pytorch/data/3d_{}_{}.pt'.format(robot_name, env_name))
+    torch.save(dataset, '/home/yuheng/DiffCo/data/3d_{}_{}.pt'.format(robot_name, env_name))
     # input()
     # for box_name in box_names:
     #     scene.remove_world_object(box_name)

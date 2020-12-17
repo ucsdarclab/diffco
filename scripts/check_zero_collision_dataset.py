@@ -1,8 +1,8 @@
 import torch
 from glob import glob
 import sys
-sys.path.append('/home/yuheng/FastronPlus-pytorch/')
-from Fastronpp import Fastron
+sys.path.append('/home/yuheng/DiffCo/')
+from diffco import DiffCo
 
 
 folders = ['2d_2dof_exp1', '2d_3dof_exp1', '2d_7dof_exp1']

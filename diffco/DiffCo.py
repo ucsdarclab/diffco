@@ -21,9 +21,12 @@ class CollisionChecker():
         points = map(lambda i: start + (target - start)/res*i, range(res))
         return any(map(lambda p: self.is_collision(p), points))
     
+    def __call__(self, *args, **kwargs):
+        return self.predict(*args, **kwargs)
+    
 
 
-class Fastron(CollisionChecker):
+class DiffCo(CollisionChecker):
     def __init__(self, obstacles, kernel_func='rq', gamma=1, beta=1, gt_checker=None):
         super().__init__(obstacles)
         # self.gt_checker = gt_checker if gt_checker is not None else CollisionChecker(self.obstacles)
@@ -59,7 +62,7 @@ class Fastron(CollisionChecker):
         #     self.y[i] = 1 if self.gt_checker.is_collision(self.support_points[i]) else -1
         self.initialize(X, y)
         
-        print('Fastron training...')
+        print('DiffCo training...')
         for it in tqdm(range(max_iteration)):
             margin = self.y * self.hypothesis
             min_margin, min_i = torch.min(margin, 0)  #1./
@@ -279,7 +282,7 @@ def vis(model, size=100, seed=2019):
         score_grad /= np.linalg.norm(score_grad, axis=2, keepdims=True)
         score_grad_x, score_grad_y = score_grad[:, :, 0], score_grad[:, :, 1]
         ax1.quiver(xx[5:-5:20, ::20], yy[5:-5:20, ::20], score_grad_x, score_grad_y, width=1e-2, headwidth=2, headlength=5, color='red')
-    # ax1.set_title('Original Fastron (kernel={}), no. of support points = {}'.format(model.kernel_func.__class__.__name__+str(model.kernel_func.__dict__), len(real_support_points)))
+    # ax1.set_title('Original DiffCo (kernel={}), no. of support points = {}'.format(model.kernel_func.__class__.__name__+str(model.kernel_func.__dict__), len(real_support_points)))
 
     # grid_nn_score = np.fromiter(map(model.score_nn, grid_points), np.float).reshape((size[0], size[1]))
     # ax2 = plt.subplot(1,3,2)
@@ -349,15 +352,6 @@ if __name__ == '__main__':
     k = kernel.RQKernel(5)
     # k = kernel.MultiQuadratic(0.7)
     # lambda x, x_prime: -k(x, x_prime)+k(np.array([0, 0]), np.array([[10, 10]]))
-    checker = Fastron(obstacles, kernel_func=k, beta=20)
+    checker = DiffCo(obstacles, kernel_func=k, beta=20)
     vis(checker, 200, seed=1917)
-    ax.bar(x+itm*w, [np.mean(stats_by_obsnum[k][n][m] if k != 'cost' or stats_by_obsnum['success'][n][m] == []\
-         else stats_by_obsnum[k][n][m][stats_by_obsnum['success'][n][m]]) for n in obsnums], width=w, \
-             yerr=None if k == 'success' else \
-                 ([np.min(stats_by_obsnum[k][n][m] if k != 'cost' \
-                     else stats_by_obsnum[k][n][m][stats_by_obsnum['success'][n][m]])\
-                          if stats_by_obsnum['success'][n][m] != [] else None for n in obsnums], \
-                  [np.max(stats_by_obsnum[k][n][m] if k != 'cost' \
-                      else stats_by_obsnum[k][n][m][stats_by_obsnum['success'][n][m]])\
-                          if stats_by_obsnum['success'][n][m] != [] else None for n in obsnums]), capsize=2, label=m)
  

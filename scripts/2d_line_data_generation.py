@@ -1,6 +1,6 @@
 import sys
 sys.path.append('/home/yuheng/DiffCo/')
-from diffco import DiffCo
+from diffco import DiffCo, FCLChecker
 from diffco import kernel
 from matplotlib import pyplot as plt
 import numpy as np
@@ -16,14 +16,18 @@ import matplotlib.patheffects as path_effects
 from diffco import utils
 from diffco.Obstacles import FCLObstacle
 from time import time
+from tqdm import tqdm
 
 
 if __name__ == "__main__":
     # ========================== Data generqation =========================
-    env_name = '1rect_1circle_7d' # 
+    env_name = '1rect_1circle_7d_line' # 
     label_type = 'binary' #[instance, class, binary]
     num_class = 2
-    DOF = 7
+    # link_length, DOF = 3.5, 2
+    # link_length, DOF = 2, 3
+    link_length, DOF = 1, 7
+    eps= np.pi/60
 
     obstacles = {
         # ('circle', (3, 2), 2), #2circle
@@ -33,17 +37,17 @@ if __name__ == "__main__":
         # ('rect', (-1.7, 3), (2, 3)),
         # ('rect', (0, -1), (10, 1)),
         # ('rect', (8, 7), 1),
-        '1rect_1circle': [('rect', (4, 3), (2, 2)),
+        '1rect_1circle_line': [('rect', (4, 3), (2, 2)),
             ('circle', (-4, -3), 1)],
         # ('rect', (4, 3), (2, 2)), # 2rect
         # ('rect', (-4, -3), (2, 2)) # 2rect
         # ('rect', (3, 2), (2, 2)) # 1rect
-        '3circle': [
+        '3circle_line': [
             ('circle', (0, 4.5), 1), #3circle
             ('circle', (-2, -3), 2), #3circle
             ('circle', (-2, 2), 1.5), #3circle
         ],
-        '1rect_1circle_7d': [
+        '1rect_1circle_7d_line': [
             ('circle', (-2, 3), 1), #1rect_1circle_7d
             ('rect', (3, 2), (2, 2)) #1rect_1circle_7d
         ],
@@ -55,13 +59,16 @@ if __name__ == "__main__":
         # ('rect', (0, 3), (16, 0.5), 1), #2class_2
         # ('rect', (0, -3), (16, 0.5), 0), #2class_2
         # ('rect', (-7, 3), (2, 2)) #1rect_active
-        '3circle_7d': [
+        '3circle_7d_line': [
             ('circle', (-2, 2), 1), #3circle_7d
             ('circle', (-3, 3), 1), #3circle
             ('circle', (-6, -3), 1) #3circle
-        ]
+        ],
         # ('rect', (5, 4), (4, 4), 0), #2instance_big
         # ('circle', (-5, -4), 2, 1) #2instance_big
+        '1rect_1circle_line': [
+            ('rect', (4, 3), (2, 2)),
+            ('circle', (-4, -3), 1)]
     }
     obstacles = obstacles[env_name]
     fcl_obs = [FCLObstacle(*param) for param in obstacles]
@@ -69,14 +76,13 @@ if __name__ == "__main__":
     # geom2instnum = {id(g): i for i, (_, g) in enumerate(fcl_obs)}
     
     width = 0.3
-    link_length = 1
     robot = RevolutePlanarRobot(link_length, width, DOF) # (7, 1), (2, 3)
 
     np.random.seed(1917)
     torch.random.manual_seed(1917)
-    num_init_points = 8000
-    if 'compare' not in env_name or DOF > 2:
-        cfgs = 2*(torch.rand((num_init_points, DOF), dtype=torch.float32)-0.5) * np.pi
+    num_init_points = 8000*5
+    if 'compare' not in env_name or robot.dof > 2:
+        cfgs = 2*(torch.rand((num_init_points, 2, robot.dof), dtype=torch.float32)-0.5) * np.pi
     else:
         # --- only for compare with gt distance
         size = [400, 400]
@@ -106,31 +112,25 @@ if __name__ == "__main__":
         for mng, obj_group in zip(obs_managers, obj_by_cls):
             mng.registerObjects(obj_group)
     
-    robot_links = robot.update_polygons(cfgs[0])
+    robot_links = robot.update_polygons(cfgs[0, :robot.dof])
     robot_manager = fcl.DynamicAABBTreeCollisionManager()
     robot_manager.registerObjects(robot_links)
     robot_manager.setup()
     for mng in obs_managers:
         mng.setup()
-    req = fcl.CollisionRequest(num_max_contacts=1000, enable_contact=True)
+    gt_checker = FCLChecker(obstacles, robot, robot_manager, obs_managers)
     
     times = []
     st = time()
-    for i, cfg in enumerate(cfgs):
+    for i, (scfg, gcfg) in enumerate(tqdm(cfgs)):
         st1 = time()
-        robot.update_polygons(cfg)
-        robot_manager.update()
-        assert len(robot_manager.getObjects()) == DOF
-        for cat, obs_mng in enumerate(obs_managers):
-            rdata = fcl.CollisionData(request = req)
-            robot_manager.collide(obs_mng, rdata, fcl.defaultCollisionCallback)
-            in_collision = rdata.result.is_collision
-            ddata = fcl.DistanceData()
-            robot_manager.distance(obs_mng, ddata, fcl.defaultDistanceCallback)
-            depths = torch.FloatTensor([c.penetration_depth for c in rdata.result.contacts])
-
-            labels[i, cat] = 1 if in_collision else -1
-            dists[i, cat] = depths.abs().max() if in_collision else -ddata.result.min_distance
+        # if gcfg[0] < scfg[0]:
+        #     t = gcfg
+        #     gcfg = scfg
+        #     scfg = t
+        line_cfgs = torch.from_numpy(np.linspace(scfg, gcfg, int(np.linalg.norm(gcfg-scfg)/eps), dtype=np.float))
+        line_labels, _ = gt_checker(line_cfgs)
+        labels[i] = 2*torch.any(line_labels==1, dim=0)-1
         end1 = time()
         times.append(end1-st1)
     end = time()
@@ -140,12 +140,10 @@ if __name__ == "__main__":
     in_collision = (labels == 1).sum(1) > 0
     if label_type == 'binary':
         labels = labels.squeeze_(1)
-        dists = dists.squeeze_(1)
-
     
 
     print('{} collisons, {} free'.format(torch.sum(in_collision==1), torch.sum(in_collision==0)))
-    dataset = {'data': cfgs, 'label': labels, 'dist': dists, 'obs': obstacles, 'robot': robot.__class__, 'rparam': [link_length, width, DOF, ]}
+    dataset = {'data': cfgs, 'label': labels, 'obs': obstacles, 'robot': robot.__class__, 'rparam': [link_length, width, DOF, ]}
     torch.save(dataset, 'data/2d_{}dof_{}.pt'.format(DOF, env_name))
     # ========================== Data generqation =========================
 

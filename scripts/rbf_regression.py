@@ -1,7 +1,7 @@
 import sys
-sys.path.append('/home/yuheng/FastronPlus-pytorch/')
-from Fastronpp import Fastron, Obstacle, CollisionChecker
-from Fastronpp import kernel
+sys.path.append('/home/yuheng/DiffCo/')
+from diffco import DiffCo, Obstacle, CollisionChecker
+from diffco import kernel
 from matplotlib import pyplot as plt
 import numpy as np
 import torch
@@ -74,7 +74,7 @@ if __name__ == "__main__":
     # kernel = kernel.CauchyKernel(100)
     # k = kernel.TangentKernel(0.8, 0)
     k = kernel.RQKernel(5)
-    checker = Fastron(obstacles, kernel_func=k, beta=20)
+    checker = DiffCo(obstacles, kernel_func=k, beta=20)
     gt_checker = CollisionChecker(obstacles)
 
     np.random.seed(1917)
@@ -97,12 +97,12 @@ if __name__ == "__main__":
 
     score_spline = rbfi(grid_points[:, 0].numpy(), grid_points[:, 1].numpy()).reshape(size)
     score_spline = torch.tensor(score_spline)
-    score_fastron = checker.score(grid_points).reshape(size)
+    score_DiffCo = checker.score(grid_points).reshape(size)
     sigma = 0.001
     # comb_score = score_spline
-    # comb_score = (1-np.exp(-(score_fastron/sigma)**2))*(score_spline) #-score_spline.min()
-    # comb_score = np.sign(score_fastron) * (score_spline-score_spline.min())
-    comb_score = (torch.sign(score_fastron)+1)/2*(score_spline-score_spline.min()) + (-torch.sign(score_fastron)+1)/2*(score_spline-score_spline.max())
+    # comb_score = (1-np.exp(-(score_DiffCo/sigma)**2))*(score_spline) #-score_spline.min()
+    # comb_score = np.sign(score_DiffCo) * (score_spline-score_spline.min())
+    comb_score = (torch.sign(score_DiffCo)+1)/2*(score_spline-score_spline.min()) + (-torch.sign(score_DiffCo)+1)/2*(score_spline-score_spline.max())
     
     # ax1 = plt.subplot(121)
     # c = ax1.pcolormesh(xx, yy, comb_score, cmap='RdBu_r', vmin=-np.abs(score_spline).max(), vmax=np.abs(score_spline).max())
@@ -121,12 +121,12 @@ if __name__ == "__main__":
     plot_score(checker, comb_score, 1, 1, regressor=rbfi)
 
     # ax2 = plt.subplot(122)
-    # c = ax2.pcolormesh(xx, yy, score_fastron, cmap='RdBu_r', vmin=-np.abs(score_fastron).max(), vmax=np.abs(score_fastron).max())
+    # c = ax2.pcolormesh(xx, yy, score_DiffCo, cmap='RdBu_r', vmin=-np.abs(score_DiffCo).max(), vmax=np.abs(score_DiffCo).max())
     # ax2.scatter(checker.support_points[:, 0], checker.support_points[:, 1], marker='.', c='black')
-    # ax2.contour(xx, yy, (score_fastron).astype(float), levels=0)
+    # ax2.contour(xx, yy, (score_DiffCo).astype(float), levels=0)
     # ax2.axis('equal')
     # fig.colorbar(c, ax=ax2)
-    # sparse_score = score_fastron[::10, ::10]
+    # sparse_score = score_DiffCo[::10, ::10]
     # score_grad_x = -ndimage.sobel(sparse_score, axis=1)
     # score_grad_y = -ndimage.sobel(sparse_score, axis=0)
     # score_grad = np.stack([score_grad_x, score_grad_y], axis=2)
@@ -134,6 +134,6 @@ if __name__ == "__main__":
     # score_grad_x, score_grad_y = score_grad[:, :, 0], score_grad[:, :, 1]
     # ax2.quiver(xx[::10, ::10], yy[::10, ::10], score_grad_x, score_grad_y, scale=40, color='red')
     # ax2.set_title('{}'.format(rbfi.epsilon))
-    # plot_score(checker, score_fastron, 3, 2)
+    # plot_score(checker, score_DiffCo, 3, 2)
     # plot_score(checker, score_spline, 3, 3)
     plt.show()

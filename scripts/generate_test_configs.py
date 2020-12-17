@@ -3,8 +3,8 @@ import torch
 import os
 from os.path import basename, splitext, join, isdir
 import sys
-sys.path.append('/home/yuheng/FastronPlus-pytorch/')
-from Fastronpp import Fastron, MultiFastron
+sys.path.append('/home/yuheng/DiffCo/')
+from diffco import DiffCo, MultiDiffCo
 
 if __name__ == "__main__":
     exp_name = '2d_7dof_exp1'

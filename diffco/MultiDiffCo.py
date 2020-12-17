@@ -2,7 +2,7 @@ import numpy as np
 from time import time
 from tqdm import tqdm
 import torch
-from .Fastron import CollisionChecker, Fastron, Obstacle, plt
+from .DiffCo import CollisionChecker, DiffCo, Obstacle, plt
 from . import kernel
 
 class MultiChecker:
@@ -16,7 +16,7 @@ class MultiChecker:
         predicts = list(map(lambda i: self.predict(start + (target - start)/res*i), range(res)))
         return any(map(lambda p: p > 0 and self.objects[p-1].get_cost() == np.inf, predicts))
 
-class MultiFastron(Fastron):
+class MultiDiffCo(DiffCo):
     def __init__(self, objects, kernel_func='rq', gamma=1, beta=1, gt_checker=None):
         super().__init__(objects, kernel_func, gamma, beta, gt_checker)
     
@@ -49,7 +49,7 @@ class MultiFastron(Fastron):
         self.initialize(X, y, gains=gains, hypothesis=hypothesis)# , kernel_matrix=kernel_matrix)
         complete = torch.zeros(self.num_class, dtype=torch.bool)
 
-        print('MultiFastron training...')
+        print('MultiDiffCo training...')
         for it in tqdm(range(max_iteration)):
             margin = self.y * self.hypothesis
             
@@ -91,15 +91,15 @@ class MultiFastron(Fastron):
         num_init_points = len(X)
         self.num_class = y.shape[1]
         if gains is None and hypothesis is None:# and kernel_matrix is None:
-            self.gains = torch.zeros((num_init_points, self.num_class))
-            self.hypothesis = torch.zeros((num_init_points, self.num_class))
+            self.gains = torch.zeros((num_init_points, self.num_class), dtype=X.dtype)
+            self.hypothesis = torch.zeros((num_init_points, self.num_class), dtype=X.dtype)
         elif gains is None or hypothesis is None: # or kernel_matrix is None:
-            raise ValueError('Fastron: you passed in some existing parameters but not both of gains and hypothesis')
+            raise ValueError('DiffCo: you passed in some existing parameters but not both of gains and hypothesis')
         else:
             self.gains = gains
             self.hypothesis = hypothesis
             # self.kernel_matrix = kernel_matrix
-        self.kernel_matrix = torch.zeros((num_init_points, num_init_points))
+        self.kernel_matrix = torch.zeros((num_init_points, num_init_points), dtype=X.dtype)
         # self.kernel_matrix = 1/(1+self.gamma/2*np.sum((K-K.transpose(1, 0, 2))**2, axis=2))**2
         self.max_n_support = 200 # Not enforced, might be a TODO
     
@@ -108,6 +108,9 @@ class MultiFastron(Fastron):
         # max_class_idx = np.argmax(score)
         return (score > 0)*2-1
         # return np.argmax(self.score(point))
+    
+    def __call__(self, *args, **kwargs):
+        return self.predict(*args, **kwargs)
 
     def score(self, points):
         kernel_values = self.kernel_func(points, self.support_points)
@@ -128,7 +131,7 @@ class MultiFastron(Fastron):
             y = self.distance
         elif 'label' in target:
             y = self.y
-        self.rbf_kernel = kernel.MultiQuadratic(rbfi.epsilon) if kernel_func is None else kernel_func
+        self.rbf_kernel = kernel.MultiQuadratic(1) if kernel_func is None else kernel_func
         kmat = self.rbf_kernel(X, X)
         print(X.shape)
         print(kmat.shape)
@@ -144,7 +147,8 @@ class MultiFastron(Fastron):
             cidx = c_iszero.repeat([len(c_nonzero), 1]).reshape(-1)
             kmat[ridx, cidx] = 0
             kmat[cidx, ridx] = 0
-        self.rbf_nodes = torch.solve(y, kmat+reg*torch.eye(len(kmat))).solution
+        print(y.dtype, kmat.dtype)
+        self.rbf_nodes = torch.solve(y, kmat+reg*torch.eye(len(kmat), dtype=kmat.dtype)).solution
         for c in range(self.num_class):
             self.rbf_nodes[self.gains == 0] = 0
         assert self.rbf_nodes.shape == (len(self.support_points), self.num_class)
@@ -202,16 +206,16 @@ class MultiFastron(Fastron):
             dim=1)
         return torch.matmul(phi_x, self.poly_nodes)
     
-    def line_collision(self, start, target, res=50):
-        points = np.linspace(start, target, res).reshape((1, res, -1))
-        pair_diff = self.support_points[:, np.newaxis] - points
-        kernel_values = 1/(1+self.gamma/2*np.sum(pair_diff**2, axis=2))**2
-        scores = torch.matmul(self.gains, kernel_values)
-        predicts = np.argmax(scores, axis=0)
-        predicts[scores[predicts, range(len(predicts))] <= 0] = -1
-        predicts += 1
-        # return any(map(lambda p: p > 0 and self.objects[p-1].get_cost() == np.inf, predicts))
-        return any(predicts > 0)
+    # def line_collision(self, start, target, res=50):
+    #     points = np.linspace(start, target, res).reshape((1, res, -1))
+    #     pair_diff = self.support_points[:, np.newaxis] - points
+    #     kernel_values = 1/(1+self.gamma/2*np.sum(pair_diff**2, axis=2))**2
+    #     scores = torch.matmul(self.gains, kernel_values)
+    #     predicts = np.argmax(scores, axis=0)
+    #     predicts[scores[predicts, range(len(predicts))] <= 0] = -1
+    #     predicts += 1
+    #     # return any(map(lambda p: p > 0 and self.objects[p-1].get_cost() == np.inf, predicts))
+    #     return any(predicts > 0)
 
     
     def vis(self, size=100):
@@ -250,8 +254,8 @@ if __name__ == '__main__':
     obstacles = [Obstacle(*param) for param in obstacles]
 
     np.random.seed(1314)
-    classifier = MultiFastron(obstacles, len(obstacles), gamma=1, beta=1)
-    classifier.train(1000)
+    classifier = MultiDiffCo(obstacles, len(obstacles), gamma=1, beta=1)
+    # classifier.train(1000)
     print(classifier.gains, classifier.gains.size)
     classifier.vis(200)
     plt.show()

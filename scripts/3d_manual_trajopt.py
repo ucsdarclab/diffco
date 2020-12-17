@@ -16,13 +16,13 @@ import json
 
 import sys
 import pickle
-sys.path.append('/home/yuheng/FastronPlus-pytorch/')
-from Fastronpp import Fastron
-from Fastronpp import kernel
+sys.path.append('/home/yuheng/DiffCo/')
+from diffco import DiffCo
+from diffco import kernel
 from matplotlib import pyplot as plt
 import numpy as np
 import torch
-# from Fastronpp.model import RevolutePlanarRobot
+# from diffco.model import RevolutePlanarRobot
 # import fcl
 # from scipy import ndimage
 # from matplotlib import animation
@@ -30,20 +30,20 @@ import torch
 # import seaborn as sns
 # sns.set()
 # import matplotlib.patheffects as path_effects
-from Fastronpp import utils
-# from Fastronpp.Obstacles import FCLObstacle
-from Fastronpp.model import BaxterFK
+from diffco import utils
+# from diffco.Obstacles import FCLObstacle
+from diffco.model import BaxterFK
 
 
-class FastronplusBaxterExperiments(object):
+class DiffCoplusBaxterExperiments(object):
     def __init__(self):
-        super(FastronplusBaxterExperiments, self).__init__()
+        super(DiffCoplusBaxterExperiments, self).__init__()
 
         ## BEGIN_SUB_TUTORIAL setup
         ##
         ## First initialize `moveit_commander`_ and a `rospy`_ node:
         moveit_commander.roscpp_initialize(sys.argv)
-        rospy.init_node('FastronplusBaxterExperiments', anonymous=True)
+        rospy.init_node('DiffCoplusBaxterExperiments', anonymous=True)
 
         ## Instantiate a `RobotCommander`_ object. Provides information such as the robot's
         ## kinematic model and the robot's current joint states
@@ -373,7 +373,7 @@ def traj_optimize(robot, start_cfg, target_cfg, dist_est, initial_guess=None, hi
     return solution, path_history, solution_trial, solution_step
 
 def animate_path(p, obstacles):
-    exp = FastronplusBaxterExperiments()
+    exp = DiffCoplusBaxterExperiments()
     print('Adding box')
     rospy.sleep(2)
 
@@ -401,7 +401,7 @@ def animate_path(p, obstacles):
     return box_names, exp
 
 def single_shot(path, obstacles):
-    exp = FastronplusBaxterExperiments()
+    exp = DiffCoplusBaxterExperiments()
     print('Adding box')
     rospy.sleep(2)
 
@@ -552,8 +552,8 @@ def main():
     fkine = robot.fkine
     # '''
     #====
-    checker = Fastron(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
-    # checker = Fastron(obstacles, beta=1.0)
+    checker = DiffCo(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
+    # checker = DiffCo(obstacles, beta=1.0)
     checker.train(cfgs[:train_num], labels[:train_num], max_iteration=len(cfgs[:train_num]))
     with open('results/checker_3d_{}_{}.p'.format(robot_name, env_name), 'wb') as f:
         pickle.dump(checker, f)
@@ -563,7 +563,7 @@ def main():
         checker = pickle.load(f)
         print('checker loaded: {}'.format(f.name))
 
-    # Check Fastron test ACC
+    # Check DiffCo test ACC
     test_preds = (checker.score(cfgs[train_num:]) > 0) * 2 - 1
     test_acc = torch.sum(test_preds == labels[train_num:], dtype=torch.float32)/len(test_preds)
     test_tpr = torch.sum(test_preds[labels[train_num:]==1] == 1, dtype=torch.float32) / len(test_preds[labels[train_num:]==1])

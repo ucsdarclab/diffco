@@ -2,13 +2,13 @@ import sys
 import json
 import os
 from os.path import basename, splitext, join, isdir
-sys.path.append('/home/yuheng/FastronPlus-pytorch/')
-from Fastronpp import Fastron, MultiFastron
-from Fastronpp import kernel
+sys.path.append('/home/yuheng/DiffCo/')
+from diffco import DiffCo, MultiDiffCo
+from diffco import kernel
 from matplotlib import pyplot as plt
 import numpy as np
 import torch
-from Fastronpp.model import RevolutePlanarRobot
+from diffco.model import RevolutePlanarRobot
 import fcl
 from scipy import ndimage
 from matplotlib import animation
@@ -16,10 +16,10 @@ from matplotlib.patches import Rectangle, FancyBboxPatch, Circle
 import seaborn as sns
 sns.set()
 import matplotlib.patheffects as path_effects
-from Fastronpp import utils
-from Fastronpp.Obstacles import FCLObstacle
+from diffco import utils
+from diffco.Obstacles import FCLObstacle
 from scipy.optimize import minimize as fmin
-from Fastronpp.FCLChecker import FCLChecker
+from diffco.FCLChecker import FCLChecker
 from time import time
 from tqdm import tqdm
 
@@ -51,8 +51,8 @@ def create_plots(robot, obstacles, dist_est, checker):
             for cat in range(num_class):
                 c_ax = fig.add_subplot(gs[cat, -1])
 
-                # score_fastron = checker.score(grid_points).reshape(size)
-                # score = (torch.sign(score_fastron)+1)/2*(score_spline-score_spline.min()) + (-torch.sign(score_fastron)+1)/2*(score_spline-score_spline.max())
+                # score_DiffCo = checker.score(grid_points).reshape(size)
+                # score = (torch.sign(score_DiffCo)+1)/2*(score_spline-score_spline.min()) + (-torch.sign(score_DiffCo)+1)/2*(score_spline-score_spline.max())
                 score = score_spline[:, :, cat]
                 color_mesh = c_ax.pcolormesh(xx, yy, score, cmap=cmaps[cat], vmin=-torch.abs(score).max(), vmax=torch.abs(score).max())
                 c_support_points = checker.support_points[checker.gains.reshape(len(checker.gains), -1)[:, cat] != 0]
@@ -306,7 +306,7 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
     call_cnt = 0
 
     def pre_process(p):
-        global var_p, latest_p, opt
+        global var_p, opt
         p = torch.DoubleTensor(p).reshape([-1, robot.dof])
         p[:] = utils.wrap2pi(p)
         var_p = torch.cat([init_path[:1], p, init_path[-1:]], dim=0).requires_grad_(True)
@@ -321,7 +321,8 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
         var_p_max_move = pre_process(p)
         latest_p_max_move = var_p_max_move.data[1:-1].numpy().reshape(-1)
         control_points = robot.fkine(var_p_max_move)
-        max_move_cost = -torch.clamp_((control_points[1:]-control_points[:-1]).pow(2).sum(dim=2)-1.5**2, min=0).sum()
+        max_move_cost = -torch.clamp_((control_points[1:]-control_points[:-1]).pow(2).sum(dim=2)-1.5**2, min=0).sum()#\
+            # -torch.clamp((utils.wrap2pi(var_p_max_move[1:]-var_p_max_move[:-1])).pow(2).sum(dim=1)-(15*np.pi/180)**2, min=0).sum() # DEBUG. No angle loss before.
         return max_move_cost.data.numpy()
     def grad_con_max_move(p):
         # global call_cnt
@@ -396,7 +397,7 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
         obj = (control_points[1:]-control_points[:-1]).pow(2).sum()
         return obj.data.numpy()
     def grad_cost(p):
-        if all(p == latest_p_cost):
+        if np.allclose(p, latest_p_cost):
             # opt.zero_grad()
             var_p_cost.grad = None
             obj.backward()
@@ -404,6 +405,7 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
                 return np.zeros(len(p), dtype=p.dtype)
             return var_p_cost.grad[1:-1].numpy().reshape(-1)
         else:
+            print(p, latest_p_cost, np.linalg.norm(p-latest_p_cost))
             raise ValueError('p is not the same as the lastest passed p')
 
     start_t = time()
@@ -547,22 +549,41 @@ def test_one_env(env_name, method, folder='data'):
     width = robot.link_width
     train_num = 6000
     fkine = robot.fkine
-    checker = Fastron(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
-    # checker = MultiFastron(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
+
+    train_t = time()
+    checker = DiffCo(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
+    # checker = MultiDiffCo(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
     checker.train(cfgs[:train_num], labels[:train_num], max_iteration=len(cfgs[:train_num]), distance=dists[:train_num])
 
-    # Check Fastron test ACC
-    test_preds = (checker.score(cfgs[train_num:]) > 0) * 2 - 1
-    test_acc = torch.sum(test_preds == labels[train_num:], dtype=torch.float32)/len(test_preds.view(-1))
-    test_tpr = torch.sum(test_preds[labels[train_num:]==1] == 1, dtype=torch.float32) / len(test_preds[labels[train_num:]==1])
-    test_tnr = torch.sum(test_preds[labels[train_num:]==-1] == -1, dtype=torch.float32) / len(test_preds[labels[train_num:]==-1])
-    print('Test acc: {}, TPR {}, TNR {}'.format(test_acc, test_tpr, test_tnr))
-    if test_acc < 0.9:
-        print('test acc is only {}'.format(test_acc))
+    # Check DiffCo test ACC
+    # test_preds = (checker.score(cfgs[train_num:]) > 0) * 2 - 1
+    # test_acc = torch.sum(test_preds == labels[train_num:], dtype=torch.float32)/len(test_preds.view(-1))
+    # test_tpr = torch.sum(test_preds[labels[train_num:]==1] == 1, dtype=torch.float32) / len(test_preds[labels[train_num:]==1])
+    # test_tnr = torch.sum(test_preds[labels[train_num:]==-1] == -1, dtype=torch.float32) / len(test_preds[labels[train_num:]==-1])
+    # print('Test acc: {}, TPR {}, TNR {}'.format(test_acc, test_tpr, test_tnr))
+    # if test_acc < 0.9:
+    #     print('test acc is only {}'.format(test_acc))
 
     fitting_target = 'label' # {label, dist, hypo}
     Epsilon = 1 #0.01
     checker.fit_rbf(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine)#, reg=0.09) # epsilon=Epsilon,
+    # ========================
+    # ONLY for additional timing exp
+    fcl_obs = [FCLObstacle(*param) for param in obstacles]
+    fcl_collision_obj = [fobs.cobj for fobs in fcl_obs]
+    obs_managers = [fcl.DynamicAABBTreeCollisionManager()]
+    obs_managers[0].registerObjects(fcl_collision_obj)
+    obs_managers[0].setup()
+    robot_links = robot.update_polygons(cfgs[0])
+    robot_manager = fcl.DynamicAABBTreeCollisionManager()
+    robot_manager.registerObjects(robot_links)
+    robot_manager.setup()
+    for mng in obs_managers:
+        mng.setup()
+    gt_checker = FCLChecker(obstacles, robot, robot_manager, obs_managers)
+    gt_checker.predict(cfgs[:train_num], distance=False)
+    return time() - train_t 
+    # END ========================
     # checker.fit_rbf(kernel_func=kernel.MultiQuadratic(Epsilon), target=fitting_target, fkine=fkine)
     # checker.fit_poly(epsilon=Epsilon, target=fitting_target, fkine=fkine)#, lmbd=80)
     dist_est = checker.rbf_score
@@ -691,7 +712,6 @@ def main(method, exp_name, override=False):
     from glob import glob
     envs = sorted(glob(join(folder, '*.pt'),))
 
-    # it = 0
     for env_name in tqdm(envs):
         env_name = splitext(basename(env_name))[0]
 
@@ -703,18 +723,33 @@ def main(method, exp_name, override=False):
                 continue
         else:
             all_rec = {}
-        # if not '2d_3dof_5obs_binary_09' in env_name:
-        #     continue
-        if not any(["_{}obs_".format(n) in env_name for n in [5]]):
-            continue
-        # it += 1
         test_rec = test_one_env(env_name, method=method, folder=folder)
         
         all_rec[method] = test_rec
         with open(rec_file, 'w') as f:
             json.dump(all_rec, f, indent=4)
-        # if it >= 3:
-        #     break # DEBUGGING
+
+def additional_timing(method, exp_name):
+    folder = join('data', exp_name)
+
+    from glob import glob
+    envs = sorted(glob(join(folder, '*.pt'),))
+
+    train_ts = {}
+    for obsn in [1,2,5,10,20]:
+        train_ts[obsn] = []
+        for env_name in tqdm(envs):
+            if not '_{}obs_'.format(obsn) in env_name:
+                continue
+            env_name = splitext(basename(env_name))[0]
+            t = test_one_env(env_name, method=method, folder=folder)
+            train_ts[obsn].append(t)
+    print('{}, {}:'.format(m, exp_name))
+    for obsn in [1,2,5,10,20]:
+        ts = np.array(train_ts[obsn])
+        print('{} train times: {} mean {} std {} '.format(obsn, ts, ts.mean(), ts.std()))
+    return train_ts
+    
 
 if __name__ == "__main__":
     # exp_name = '2d_2dof_exp1'
@@ -725,11 +760,20 @@ if __name__ == "__main__":
     #     et = time()
     #     print('Method {}, Exp {}, time = {:.3f} secs'.format(m, exp_name, et-st))
     
-    exps = ['2d_7dof_exp1'] #, '2d_3dof_exp1'
-    methods = ['fclgradfree'] #'diffco', 'givengrad', 'bidiffco', 
+    exps = ['2d_2dof_exp1', '2d_3dof_exp1', '2d_7dof_exp1'] #, '2d_3dof_exp1'
+    methods = ['diffco'] #'diffco', 'givengrad', 'bidiffco', 'fclgradfree'
+    res = {}
     for exp_name in exps:
+        res[exp_name] = {}
         for m in methods:
             st = time()
-            main(m, exp_name, override=True)
+            # main(m, exp_name, override=True)
+            res[exp_name][m] = additional_timing(m, exp_name)
             et = time()
             print('Method {}, Exp {}, time = {:.3f} secs'.format(m, exp_name, et-st))
+    for exp_name in exps:
+        for m in methods:
+            print('{}, {}:'.format(m, exp_name))
+            for obsn in [1,2,5,10,20]:
+                ts = np.array(res[exp_name][m][obsn])
+                print('{} train times: {} mean {} std {} '.format(obsn, ts, ts.mean(), ts.std()))

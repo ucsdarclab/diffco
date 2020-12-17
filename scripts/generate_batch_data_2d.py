@@ -1,5 +1,5 @@
 import sys
-sys.path.append('/home/yuheng/FastronPlus-pytorch/')
+sys.path.append('/home/yuheng/DiffCo/')
 import os
 from time import time
 
@@ -14,12 +14,12 @@ import seaborn as sns
 sns.set()
 import matplotlib.patheffects as path_effects
 
-from Fastronpp import Fastron
-from Fastronpp import kernel
+from diffco import DiffCo
+from diffco import kernel
 from matplotlib import pyplot as plt
-from Fastronpp.model import RevolutePlanarRobot
-from Fastronpp import utils
-from Fastronpp.Obstacles import FCLObstacle
+from diffco.model import RevolutePlanarRobot
+from diffco import utils
+from diffco.Obstacles import FCLObstacle
 
 def create_plots(robot, obstacles, cfg=None):
     from matplotlib.cm import get_cmap

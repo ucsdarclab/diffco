@@ -1,6 +1,6 @@
 import sys
-sys.path.append('/home/yuheng/FastronPlus-pytorch/')
-from Fastronpp.Fastron import *
+sys.path.append('/home/yuheng/DiffCo/')
+from diffco.DiffCo import *
 
 # from import kernel
 obstacles = [
@@ -17,5 +17,5 @@ obstacles = [Obstacle(*param) for param in obstacles]
 k = kernel.RQKernel(20)
 # k = kernel.MultiQuadratic(0.7)
 # lambda x, x_prime: -k(x, x_prime)+k(np.array([0, 0]), np.array([[10, 10]]))
-checker = Fastron(obstacles, kernel_func=k, beta=1)
+checker = DiffCo(obstacles, kernel_func=k, beta=1)
 vis(checker, 400, seed=1917)
