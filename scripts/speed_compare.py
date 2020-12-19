@@ -693,13 +693,16 @@ def test_one_env(env_name, method, folder='data'):
 
     return test_rec
 
-def main(method, exp_name, override=False):
+def main(method, exp_name, override=False, load_exp=None):
     # method = 'fclgradfree'
     # method = 'diffco'
     # method = 'givengrad'
 
-    folder = join('data', exp_name)
+    if load_exp is not None:
+        print('Loading experiment results from {}'.format(load_exp))
+    data_folder = join('data', exp_name if load_exp is None else load_exp)
     res_folder = join('results', exp_name)
+    restored_res_folder = res_folder if load_exp is None else join('results', load_exp)
     if not isdir(res_folder):
         os.makedirs(res_folder)
     elif not override:
@@ -710,21 +713,24 @@ def main(method, exp_name, override=False):
             exit(1)
 
     from glob import glob
-    envs = sorted(glob(join(folder, '*.pt'),))
+    envs = sorted(glob(join(data_folder, '*.pt'),))
 
     for env_name in tqdm(envs):
         env_name = splitext(basename(env_name))[0]
 
-        rec_file = os.path.join(res_folder, env_name+'.json')
-        if os.path.isfile(rec_file):
-            with open(rec_file, 'r') as f:
+        restore_rec_file = os.path.join(restored_res_folder, env_name+'.json')
+        if os.path.isfile(restore_rec_file):
+            with open(restore_rec_file, 'r') as f:
                 all_rec = json.load(f)
             if method in all_rec:
                 continue
         else:
+            assert load_exp is not None, \
+                'Trying to load experiment {}, but the result file {} does not exist'.format(load_exp, restore_rec_file)
             all_rec = {}
-        test_rec = test_one_env(env_name, method=method, folder=folder)
+        test_rec = test_one_env(env_name, method=method, folder=data_folder)
         
+        rec_file = os.path.join(res_folder, env_name+'.json')
         all_rec[method] = test_rec
         with open(rec_file, 'w') as f:
             json.dump(all_rec, f, indent=4)
@@ -760,15 +766,16 @@ if __name__ == "__main__":
     #     et = time()
     #     print('Method {}, Exp {}, time = {:.3f} secs'.format(m, exp_name, et-st))
     
-    exps = ['2d_2dof_exp1', '2d_3dof_exp1', '2d_7dof_exp1'] #, '2d_3dof_exp1'
+    exps = ['2d_2dof_exp2', '2d_3dof_exp2', '2d_7dof_exp3'] #['2d_2dof_exp1', '2d_3dof_exp1', '2d_7dof_exp1'] #, '2d_3dof_exp1'
+    load_exps = ['2d_2dof_exp1', '2d_3dof_exp1', '2d_7dof_exp1']
     methods = ['diffco'] #'diffco', 'givengrad', 'bidiffco', 'fclgradfree'
     res = {}
-    for exp_name in exps:
+    for exp_name, loadexp in zip(exps, load_exps):
         res[exp_name] = {}
         for m in methods:
             st = time()
-            # main(m, exp_name, override=True)
-            res[exp_name][m] = additional_timing(m, exp_name)
+            main(m, exp_name, override=True, load_exp=loadexp)
+            # res[exp_name][m] = additional_timing(m, exp_name)
             et = time()
             print('Method {}, Exp {}, time = {:.3f} secs'.format(m, exp_name, et-st))
     for exp_name in exps:
