@@ -2,7 +2,7 @@ import sys
 import json
 from os.path import join, isdir, isfile
 from os import makedirs
-sys.path.append('/home/yuheng/DiffCo/')
+# sys.path.append('/home/yuheng/DiffCo/')
 from diffco import DiffCo, MultiDiffCo, CollisionChecker
 from diffco import kernel
 from matplotlib import pyplot as plt

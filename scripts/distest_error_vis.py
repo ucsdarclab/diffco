@@ -1,6 +1,6 @@
 import sys
 import json
-sys.path.append('/home/yuheng/DiffCo/')
+# sys.path.append('/home/yuheng/DiffCo/')
 from diffco import DiffCo, MultiDiffCo
 from diffco import kernel
 from matplotlib import pyplot as plt

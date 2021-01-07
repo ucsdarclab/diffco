@@ -1,5 +1,5 @@
 import sys
-sys.path.append('/home/yuheng/DiffCo/')
+# sys.path.append('/home/yuheng/DiffCo/')
 from diffco import DiffCo, Obstacle, CollisionChecker
 from diffco import kernel
 from matplotlib import pyplot as plt

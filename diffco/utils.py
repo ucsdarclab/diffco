@@ -32,4 +32,4 @@ if __name__ == "__main__":
     # plt.plot(x, y)
     # plt.show()
     print(wrap2pi(0.8*np.pi - (-0.9)*np.pi)/np.pi*180)
-    print(anglin([-0.8*np.pi], [0.9*np.pi], 4, False)/np.pi*180)
+    print(anglin([-0.8*np.pi], [0.9*np.pi], 1, False)/np.pi*180)

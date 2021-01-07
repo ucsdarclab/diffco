@@ -3,7 +3,7 @@ import torch
 import os
 from os.path import basename, splitext, join, isdir
 import sys
-sys.path.append('/home/yuheng/DiffCo/')
+# sys.path.append('/home/yuheng/DiffCo/')
 from diffco import DiffCo, MultiDiffCo
 
 if __name__ == "__main__":

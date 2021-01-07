@@ -2,7 +2,7 @@ import sys
 import json
 import os
 from os.path import basename, splitext, join, isdir
-sys.path.append('/home/yuheng/DiffCo/')
+# sys.path.append('/home/yuheng/DiffCo/')
 from diffco import DiffCo, MultiDiffCo
 from diffco import kernel
 from matplotlib import pyplot as plt
@@ -201,7 +201,11 @@ def adam_traj_optimize(robot, dist_est, start_cfg, target_cfg, options): # histo
     for trial_time in range(NUM_RE_TRIALS):
         path_history = []
         if trial_time == 0:
-            init_path = torch.from_numpy(np.linspace(start_cfg, target_cfg, num=N_WAYPOINTS)).double()
+            if 'init_solution' in options:
+                assert isinstance(options['init_solution'], torch.Tensor)
+                init_path = options['init_solution']
+            else:
+                init_path = torch.from_numpy(np.linspace(start_cfg, target_cfg, num=N_WAYPOINTS)).double()
         else:
             init_path = torch.rand((N_WAYPOINTS, robot.dof)).double()
             init_path = init_path * (robot.limits[:, 1]-robot.limits[:, 0]) + robot.limits[:, 0]
@@ -412,7 +416,11 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
     success = False
     for trial_time in range(NUM_RE_TRIALS):
         if trial_time == 0:
-            init_path = torch.from_numpy(np.linspace(start_cfg, target_cfg, num=N_WAYPOINTS, dtype=np.float64))
+            if 'init_solution' in options:
+                assert isinstance(options['init_solution'], torch.Tensor)
+                init_path = options['init_solution']
+            else:
+                init_path = torch.from_numpy(np.linspace(start_cfg, target_cfg, num=N_WAYPOINTS, dtype=np.float64))
         else:
             init_path = (torch.rand(N_WAYPOINTS, robot.dof, dtype=torch.float64))*np.pi*2-np.pi
         init_path[0] = start_cfg
@@ -499,7 +507,11 @@ def gradient_free_traj_optimize(robot, checker, start_cfg, target_cfg, options=N
     success = False
     for trial_time in range(NUM_RE_TRIALS):
         if trial_time == 0:
-            init_path = torch.from_numpy(np.linspace(start_cfg, target_cfg, num=N_WAYPOINTS, dtype=np.float64))
+            if 'init_solution' in options:
+                assert isinstance(options['init_solution'], torch.Tensor)
+                init_path = options['init_solution']
+            else:
+                init_path = torch.from_numpy(np.linspace(start_cfg, target_cfg, num=N_WAYPOINTS, dtype=np.float64))
         else:
             init_path = (torch.rand(N_WAYPOINTS, robot.dof, dtype=torch.float64))*np.pi*2-np.pi
         init_path[0] = start_cfg
@@ -536,7 +548,25 @@ def gradient_free_traj_optimize(robot, checker, start_cfg, target_cfg, options=N
     }
     return rec
 
-def test_one_env(env_name, method, folder='data'):
+class ExpConfigs(object):
+    # A simple class to store experiment configurations. 
+    # arguments not mentioned in args will be in their default values
+    def __init__(self, args: dict):
+        # default values
+        self.load_exp = None
+        self.include_validate_time = True
+        self.use_previous_solution = True
+        self.validate_density = 1
+
+        for k, v in args.items():
+            assert hasattr(self, k)
+            setattr(self, k, v)
+
+def test_one_env(env_name, method, folder, args: ExpConfigs, prev_rec={}):
+    assert (args.use_previous_solution and prev_rec != {}) or \
+        ((not args.use_previous_solution) and prev_rec == {}), \
+            "args.use_previous_solution does not match the existence of prev_rec."
+
     print(env_name, method, 'Begin')
     # Prepare distance estimator ====================
     dataset = torch.load('{}/{}.pt'.format(folder, env_name))
@@ -567,25 +597,25 @@ def test_one_env(env_name, method, folder='data'):
     fitting_target = 'label' # {label, dist, hypo}
     Epsilon = 1 #0.01
     checker.fit_rbf(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine)#, reg=0.09) # epsilon=Epsilon,
-    # ========================
-    # ONLY for additional timing exp
-    fcl_obs = [FCLObstacle(*param) for param in obstacles]
-    fcl_collision_obj = [fobs.cobj for fobs in fcl_obs]
-    obs_managers = [fcl.DynamicAABBTreeCollisionManager()]
-    obs_managers[0].registerObjects(fcl_collision_obj)
-    obs_managers[0].setup()
-    robot_links = robot.update_polygons(cfgs[0])
-    robot_manager = fcl.DynamicAABBTreeCollisionManager()
-    robot_manager.registerObjects(robot_links)
-    robot_manager.setup()
-    for mng in obs_managers:
-        mng.setup()
-    gt_checker = FCLChecker(obstacles, robot, robot_manager, obs_managers)
-    gt_checker.predict(cfgs[:train_num], distance=False)
-    return time() - train_t 
-    # END ========================
     # checker.fit_rbf(kernel_func=kernel.MultiQuadratic(Epsilon), target=fitting_target, fkine=fkine)
     # checker.fit_poly(epsilon=Epsilon, target=fitting_target, fkine=fkine)#, lmbd=80)
+    # ========================
+    # ONLY for additional training timing exp
+    # fcl_obs = [FCLObstacle(*param) for param in obstacles]
+    # fcl_collision_obj = [fobs.cobj for fobs in fcl_obs]
+    # obs_managers = [fcl.DynamicAABBTreeCollisionManager()]
+    # obs_managers[0].registerObjects(fcl_collision_obj)
+    # obs_managers[0].setup()
+    # robot_links = robot.update_polygons(cfgs[0])
+    # robot_manager = fcl.DynamicAABBTreeCollisionManager()
+    # robot_manager.registerObjects(robot_links)
+    # robot_manager.setup()
+    # for mng in obs_managers:
+    #     mng.setup()
+    # gt_checker = FCLChecker(obstacles, robot, robot_manager, obs_managers)
+    # gt_checker.predict(cfgs[:train_num], distance=False)
+    # return time() - train_t
+    # END ========================
     dist_est = checker.rbf_score
     # dist_est = checker.poly_score
     min_score = dist_est(cfgs[train_num:]).min().item()
@@ -599,8 +629,6 @@ def test_one_env(env_name, method, folder='data'):
     label_type = 'binary'
     num_class = 1
 
-    np.random.seed(1918)
-    torch.random.manual_seed(1918)
     if label_type == 'binary':
         obs_managers = [fcl.DynamicAABBTreeCollisionManager()]
         obs_managers[0].registerObjects(fcl_collision_obj)
@@ -628,61 +656,126 @@ def test_one_env(env_name, method, folder='data'):
 
     options = {
         'N_WAYPOINTS': 20,
-        'NUM_RE_TRIALS': 3, # Debugging
+        'NUM_RE_TRIALS': 3,
         'MAXITER': 200,
         'safety_margin': max(1/5*min_score, -0.5),
         'seed': 19961221,
         'history': False
     }
 
+    repair_options = {
+        'N_WAYPOINTS': 20,
+        'NUM_RE_TRIALS': 1, # just one trial
+        'MAXITER': 200,
+        'seed': 19961221, # actually not used due to only one trial
+        'history': False,
+    }
+
     test_rec = {
         'start_cfg': [],
         'target_cfg': [],
         'cnt_check': [],
+        'repair_cnt_check': [],
         'cost': [],
+        'repair_cost': [],
         # 'cons_violation': [],
         'time': [],
+        'val_time': [],
+        'repair_time': [],
         'success': [],
+        'repair_success': [],
         'seed': [],
-        'solution': []
+        'solution': [],
+        'repair_solution': [],
     }
     
     with open('{}/{}_testcfgs.json'.format(folder, env_name), 'r') as f:
         test_cfg_dataset = json.load(f)
-        s_cfgs = torch.FloatTensor(test_cfg_dataset['start_cfgs'])[:2]
-        t_cfgs = torch.FloatTensor(test_cfg_dataset['target_cfgs'])[:2]
+        s_cfgs = torch.FloatTensor(test_cfg_dataset['start_cfgs'])[:10]
+        t_cfgs = torch.FloatTensor(test_cfg_dataset['target_cfgs'])[:10]
         assert env_name == test_cfg_dataset['env_name']
+    if prev_rec != {}:
+        s_cfgs = torch.FloatTensor(test_cfg_dataset['start_cfgs'])[:len(prev_rec['success'])]
+        t_cfgs = torch.FloatTensor(test_cfg_dataset['target_cfgs'])[:len(prev_rec['success'])]
+        assert len(s_cfgs) == len(prev_rec['success']) and len(t_cfgs) == len(prev_rec['success'])
+        rec_s_cfgs = torch.FloatTensor(prev_rec['solution'])[:, 0]
+        rec_t_cfgs = torch.FloatTensor(prev_rec['solution'])[:, -1]
+        assert torch.all(torch.isclose(rec_s_cfgs, s_cfgs)) and torch.all(torch.isclose(rec_t_cfgs, t_cfgs))
     for test_it, (start_cfg, target_cfg) in tqdm(enumerate(zip(s_cfgs, t_cfgs)), desc='Test Query'):
         options['seed'] += 1 # Otherwise the random initialization will stay the same every problem
-        if method == 'fclgradfree':
-            tmp_rec = gradient_free_traj_optimize(robot, lambda cfg: fcl_checker.predict(cfg, distance=False)[0], start_cfg, target_cfg, options=options)
+        if prev_rec != {}:
+            tmp_rec = {k: prev_rec[k][test_it] for k in prev_rec}
+        elif method == 'fclgradfree':
+            tmp_rec = gradient_free_traj_optimize(robot, lambda cfg: fcl_checker.predict(cfg, distance=False), start_cfg, target_cfg, options=options)
+        elif method == 'fcldist':
+            tmp_rec = gradient_free_traj_optimize(robot, fcl_checker.score, start_cfg, target_cfg, options=options)
         elif method == 'diffco':
-            tmp_rec = adam_traj_optimize(robot, dist_est, start_cfg, target_cfg, options)
+            tmp_rec = adam_traj_optimize(robot, dist_est, start_cfg, target_cfg, options=options)
         elif method == 'bidiffco':
             tmp_rec = gradient_free_traj_optimize(robot, lambda cfg: 2*(dist_est(cfg)>=0).type(torch.FloatTensor)-1, start_cfg, target_cfg, options=options)
+        elif method == 'diffcogradfree':
+            with torch.no_grad():
+                tmp_rec = gradient_free_traj_optimize(robot, dist_est, start_cfg, target_cfg, options=options)
         elif method == 'givengrad':
             tmp_rec = givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options=options)
+        else:
+            raise NotImplementedError('Method = {} not implemented'.format(method))
         
         # Verification
         # if tmp_rec['success']:
-        veri_cfgs = [utils.anglin(q1, q2, 3, endpoint=False)\
-            for q1, q2 in zip(tmp_rec['solution'][:-1], tmp_rec['solution'][1:])]
-        veri_cfgs = torch.cat(veri_cfgs, 0)
-        collosion_free = torch.all(fcl_checker.predict(veri_cfgs, distance=False)[0] < 0).item()
-        withinlimit = torch.all(robot.limits[:, 0] <= torch.FloatTensor(tmp_rec['solution'])).item() \
-            and torch.all(torch.FloatTensor(tmp_rec['solution']) <= robot.limits[:, 1]).item()
-        tmp_rec['success'] = collosion_free and withinlimit
-        # print(tmp_rec['success'])
+        def con_max_move(p):
+            control_points = robot.fkine(p)
+            return torch.all((control_points[1:]-control_points[:-1]).pow(2).sum(dim=2)-1.5**2 <= 0).item()
+        def con_collision_free(p):
+            return torch.all(fcl_checker.predict(p, distance=False) < 0).item()
+        def con_joint_limit(p):
+            return (torch.all(robot.limits[:, 0]-p <= 0) and torch.all(p-robot.limits[:, 1] <= 0)).item()
+
+        def validate(solution):
+            veri_cfgs = [utils.anglin(q1, q2, args.validate_density, endpoint=False)\
+                for q1, q2 in zip(solution[:-1], solution[1:])]
+            veri_cfgs = torch.cat(veri_cfgs, 0)
+            collosion_free = con_collision_free(veri_cfgs) # torch.all(fcl_checker.predict(veri_cfgs, distance=False) < 0).item()
+            sol_tensor = torch.FloatTensor(solution)
+            within_jointlimit = con_joint_limit(sol_tensor)
+            within_movelimit = con_max_move(sol_tensor)
+            # withinlimit = torch.all(robot.limits[:, 0] <= torch.FloatTensor(tmp_rec['solution'])).item() \
+            #     and torch.all(torch.FloatTensor(tmp_rec['solution']) <= robot.limits[:, 1]).item()
+            return collosion_free and within_jointlimit and within_movelimit
+        
+        if 'fcl' in method and args.validate_density == 1: # skip validation if using fcl and density is only 1
+            val_t = 0
+        else:
+            val_t = time()
+            tmp_rec['success'] = validate(tmp_rec['solution'])
+            val_t = time() - val_t
+        tmp_rec['val_time'] = val_t
 
         for k in tmp_rec:
             test_rec[k].append(tmp_rec[k])
+        
+        # Repair
+        if not tmp_rec['success'] and method != 'fcldist':
+            repair_rec = gradient_free_traj_optimize(robot, fcl_checker.score, start_cfg, target_cfg, 
+                options={**repair_options, 'init_solution': torch.DoubleTensor(tmp_rec['solution'])})
+            # repair_rec['success'] = validate(repair_rec['solution']) # validation not needed
+        else:
+            repair_rec = {
+                'cnt_check': 0,
+                'cost': tmp_rec['cost'],
+                'time': 0,
+                'success': tmp_rec['success'],
+                'solution': tmp_rec['solution'],
+            }
+        for k in ['cnt_check', 'cost', 'time', 'success', 'solution']:
+            test_rec['repair_'+k].append(repair_rec[k])
         
         cfg_path_plots = []
         if robot.dof > 2:
             fig, ax, link_plot, joint_plot, eff_plot = create_plots(robot, obstacles, dist_est, checker)
         elif robot.dof == 2:
             fig, ax, link_plot, joint_plot, eff_plot, cfg_path_plots = create_plots(robot, obstacles, dist_est, checker)
-        single_plot(robot, torch.FloatTensor(tmp_rec['solution']), fig, link_plot, joint_plot, eff_plot, cfg_path_plots=cfg_path_plots, ax=ax)
+        single_plot(robot, torch.FloatTensor(test_rec['repair_solution'][-1]), fig, link_plot, joint_plot, eff_plot, cfg_path_plots=cfg_path_plots, ax=ax)
         debug_dir = join('debug', exp_name, method)
         if not isdir(debug_dir):
             os.makedirs(debug_dir)
@@ -693,16 +786,16 @@ def test_one_env(env_name, method, folder='data'):
 
     return test_rec
 
-def main(method, exp_name, override=False, load_exp=None):
+def main(method, exp_name, override=False, args=None):
     # method = 'fclgradfree'
     # method = 'diffco'
     # method = 'givengrad'
 
-    if load_exp is not None:
-        print('Loading experiment results from {}'.format(load_exp))
-    data_folder = join('data', exp_name if load_exp is None else load_exp)
+    if args.load_exp is not None:
+        print('Loading experiment results from {}'.format(args.load_exp))
+    data_folder = join('data', exp_name if args.load_exp is None else args.load_exp)
     res_folder = join('results', exp_name)
-    restored_res_folder = res_folder if load_exp is None else join('results', load_exp)
+    restored_res_folder = res_folder if args.load_exp is None else join('results', args.load_exp)
     if not isdir(res_folder):
         os.makedirs(res_folder)
     elif not override:
@@ -711,6 +804,9 @@ def main(method, exp_name, override=False, load_exp=None):
             pass
         else:
             exit(1)
+    
+    with open(join(res_folder, 'config.json'), 'w') as f:
+        json.dump(args.__dict__, f)
 
     from glob import glob
     envs = sorted(glob(join(data_folder, '*.pt'),))
@@ -722,13 +818,13 @@ def main(method, exp_name, override=False, load_exp=None):
         if os.path.isfile(restore_rec_file):
             with open(restore_rec_file, 'r') as f:
                 all_rec = json.load(f)
-            if method in all_rec:
+            if method in all_rec and args.load_exp is None:
                 continue
         else:
-            assert load_exp is not None, \
-                'Trying to load experiment {}, but the result file {} does not exist'.format(load_exp, restore_rec_file)
+            assert args.load_exp is None, \
+                'Trying to load experiment {}, but the result file {} does not exist'.format(args.load_exp, restore_rec_file)
             all_rec = {}
-        test_rec = test_one_env(env_name, method=method, folder=data_folder)
+        test_rec = test_one_env(env_name, method=method, folder=data_folder, args=args, prev_rec=all_rec[method])
         
         rec_file = os.path.join(res_folder, env_name+'.json')
         all_rec[method] = test_rec
@@ -755,7 +851,8 @@ def additional_timing(method, exp_name):
         ts = np.array(train_ts[obsn])
         print('{} train times: {} mean {} std {} '.format(obsn, ts, ts.mean(), ts.std()))
     return train_ts
-    
+
+
 
 if __name__ == "__main__":
     # exp_name = '2d_2dof_exp1'
@@ -766,21 +863,29 @@ if __name__ == "__main__":
     #     et = time()
     #     print('Method {}, Exp {}, time = {:.3f} secs'.format(m, exp_name, et-st))
     
-    exps = ['2d_2dof_exp2', '2d_3dof_exp2', '2d_7dof_exp3'] #['2d_2dof_exp1', '2d_3dof_exp1', '2d_7dof_exp1'] #, '2d_3dof_exp1'
+    exps = ['2d_2dof_exp2', '2d_3dof_exp2', '2d_7dof_exp2'] #['2d_2dof_exp1', '2d_3dof_exp1', '2d_7dof_exp1'] #, '2d_3dof_exp1'
     load_exps = ['2d_2dof_exp1', '2d_3dof_exp1', '2d_7dof_exp1']
-    methods = ['diffco'] #'diffco', 'givengrad', 'bidiffco', 'fclgradfree'
+    import diffco as Fastronpp
+    methods = ['diffco', 'givengrad', 'bidiffco'] #'diffco', 'givengrad', 'bidiffco', 'fclgradfree'
     res = {}
     for exp_name, loadexp in zip(exps, load_exps):
         res[exp_name] = {}
         for m in methods:
             st = time()
-            main(m, exp_name, override=True, load_exp=loadexp)
+            args = dict(
+                load_exp=loadexp,
+                include_validate_time=True,
+                use_previous_solution=True,
+                validate_density=1,
+            )
+            args=ExpConfigs(args)
+            main(m, exp_name, override=True, args=args)
             # res[exp_name][m] = additional_timing(m, exp_name)
             et = time()
             print('Method {}, Exp {}, time = {:.3f} secs'.format(m, exp_name, et-st))
-    for exp_name in exps:
-        for m in methods:
-            print('{}, {}:'.format(m, exp_name))
-            for obsn in [1,2,5,10,20]:
-                ts = np.array(res[exp_name][m][obsn])
-                print('{} train times: {} mean {} std {} '.format(obsn, ts, ts.mean(), ts.std()))
+    # for exp_name in exps:
+    #     for m in methods:
+    #         print('{}, {}:'.format(m, exp_name))
+    #         for obsn in [1,2,5,10,20]:
+    #             ts = np.array(res[exp_name][m][obsn])
+    #             print('{} train times: {} mean {} std {} '.format(obsn, ts, ts.mean(), ts.std()))

@@ -8,3 +8,5 @@ data/*/
 figs/
 *.png
 .ipynb_checkpoints/
+*egg-info
+data_before_renaming/
