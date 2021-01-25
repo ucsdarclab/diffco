@@ -557,6 +557,7 @@ class ExpConfigs(object):
         self.include_validate_time = True
         self.use_previous_solution = True
         self.validate_density = 1
+        self.only_repair = False
 
         for k, v in args.items():
             assert hasattr(self, k)
@@ -583,43 +584,47 @@ def test_one_env(env_name, method, folder, args: ExpConfigs, prev_rec={}):
     train_t = time()
     checker = DiffCo(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
     # checker = MultiDiffCo(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
-    checker.train(cfgs[:train_num], labels[:train_num], max_iteration=len(cfgs[:train_num]), distance=dists[:train_num])
+    if not args.use_previous_solution:
+        checker.train(cfgs[:train_num], labels[:train_num], max_iteration=len(cfgs[:train_num]), distance=dists[:train_num])
 
-    # Check DiffCo test ACC
-    # test_preds = (checker.score(cfgs[train_num:]) > 0) * 2 - 1
-    # test_acc = torch.sum(test_preds == labels[train_num:], dtype=torch.float32)/len(test_preds.view(-1))
-    # test_tpr = torch.sum(test_preds[labels[train_num:]==1] == 1, dtype=torch.float32) / len(test_preds[labels[train_num:]==1])
-    # test_tnr = torch.sum(test_preds[labels[train_num:]==-1] == -1, dtype=torch.float32) / len(test_preds[labels[train_num:]==-1])
-    # print('Test acc: {}, TPR {}, TNR {}'.format(test_acc, test_tpr, test_tnr))
-    # if test_acc < 0.9:
-    #     print('test acc is only {}'.format(test_acc))
+        # Check DiffCo test ACC
+        # test_preds = (checker.score(cfgs[train_num:]) > 0) * 2 - 1
+        # test_acc = torch.sum(test_preds == labels[train_num:], dtype=torch.float32)/len(test_preds.view(-1))
+        # test_tpr = torch.sum(test_preds[labels[train_num:]==1] == 1, dtype=torch.float32) / len(test_preds[labels[train_num:]==1])
+        # test_tnr = torch.sum(test_preds[labels[train_num:]==-1] == -1, dtype=torch.float32) / len(test_preds[labels[train_num:]==-1])
+        # print('Test acc: {}, TPR {}, TNR {}'.format(test_acc, test_tpr, test_tnr))
+        # if test_acc < 0.9:
+        #     print('test acc is only {}'.format(test_acc))
 
-    fitting_target = 'label' # {label, dist, hypo}
-    Epsilon = 1 #0.01
-    checker.fit_rbf(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine)#, reg=0.09) # epsilon=Epsilon,
-    # checker.fit_rbf(kernel_func=kernel.MultiQuadratic(Epsilon), target=fitting_target, fkine=fkine)
-    # checker.fit_poly(epsilon=Epsilon, target=fitting_target, fkine=fkine)#, lmbd=80)
-    # ========================
-    # ONLY for additional training timing exp
-    # fcl_obs = [FCLObstacle(*param) for param in obstacles]
-    # fcl_collision_obj = [fobs.cobj for fobs in fcl_obs]
-    # obs_managers = [fcl.DynamicAABBTreeCollisionManager()]
-    # obs_managers[0].registerObjects(fcl_collision_obj)
-    # obs_managers[0].setup()
-    # robot_links = robot.update_polygons(cfgs[0])
-    # robot_manager = fcl.DynamicAABBTreeCollisionManager()
-    # robot_manager.registerObjects(robot_links)
-    # robot_manager.setup()
-    # for mng in obs_managers:
-    #     mng.setup()
-    # gt_checker = FCLChecker(obstacles, robot, robot_manager, obs_managers)
-    # gt_checker.predict(cfgs[:train_num], distance=False)
-    # return time() - train_t
-    # END ========================
-    dist_est = checker.rbf_score
-    # dist_est = checker.poly_score
-    min_score = dist_est(cfgs[train_num:]).min().item()
-    # print('MIN_SCORE = {:.6f}'.format(min_score))
+        fitting_target = 'label' # {label, dist, hypo}
+        Epsilon = 1 #0.01
+        checker.fit_rbf(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine)#, reg=0.09) # epsilon=Epsilon,
+        # checker.fit_rbf(kernel_func=kernel.MultiQuadratic(Epsilon), target=fitting_target, fkine=fkine)
+        # checker.fit_poly(epsilon=Epsilon, target=fitting_target, fkine=fkine)#, lmbd=80)
+        # ========================
+        # ONLY for additional training timing exp
+        # fcl_obs = [FCLObstacle(*param) for param in obstacles]
+        # fcl_collision_obj = [fobs.cobj for fobs in fcl_obs]
+        # obs_managers = [fcl.DynamicAABBTreeCollisionManager()]
+        # obs_managers[0].registerObjects(fcl_collision_obj)
+        # obs_managers[0].setup()
+        # robot_links = robot.update_polygons(cfgs[0])
+        # robot_manager = fcl.DynamicAABBTreeCollisionManager()
+        # robot_manager.registerObjects(robot_links)
+        # robot_manager.setup()
+        # for mng in obs_managers:
+        #     mng.setup()
+        # gt_checker = FCLChecker(obstacles, robot, robot_manager, obs_managers)
+        # gt_checker.predict(cfgs[:train_num], distance=False)
+        # return time() - train_t
+        # END ========================
+        dist_est = checker.rbf_score
+        # dist_est = checker.poly_score
+        min_score = dist_est(cfgs[train_num:]).min().item()
+        # print('MIN_SCORE = {:.6f}'.format(min_score))
+    else:
+        dist_est = None
+        min_score = 0
     # ==============================================
 
     # FCL checker =====================
@@ -695,17 +700,20 @@ def test_one_env(env_name, method, folder, args: ExpConfigs, prev_rec={}):
         t_cfgs = torch.FloatTensor(test_cfg_dataset['target_cfgs'])[:10]
         assert env_name == test_cfg_dataset['env_name']
     if prev_rec != {}:
-        s_cfgs = torch.FloatTensor(test_cfg_dataset['start_cfgs'])[:len(prev_rec['success'])]
-        t_cfgs = torch.FloatTensor(test_cfg_dataset['target_cfgs'])[:len(prev_rec['success'])]
-        assert len(s_cfgs) == len(prev_rec['success']) and len(t_cfgs) == len(prev_rec['success'])
+        # s_cfgs = torch.FloatTensor(test_cfg_dataset['start_cfgs'])[:len(prev_rec['success'])]
+        # t_cfgs = torch.FloatTensor(test_cfg_dataset['target_cfgs'])[:len(prev_rec['success'])]
+        # assert len(s_cfgs) == len(prev_rec['success']) and len(t_cfgs) == len(prev_rec['success'])
+
         rec_s_cfgs = torch.FloatTensor(prev_rec['solution'])[:, 0]
         rec_t_cfgs = torch.FloatTensor(prev_rec['solution'])[:, -1]
-        assert torch.all(torch.isclose(rec_s_cfgs, s_cfgs)) and torch.all(torch.isclose(rec_t_cfgs, t_cfgs))
+        assert torch.all(torch.isclose(rec_s_cfgs, s_cfgs[:len(rec_s_cfgs)])) and torch.all(torch.isclose(rec_t_cfgs, t_cfgs[:len(rec_t_cfgs)]))
     for test_it, (start_cfg, target_cfg) in tqdm(enumerate(zip(s_cfgs, t_cfgs)), desc='Test Query'):
         options['seed'] += 1 # Otherwise the random initialization will stay the same every problem
-        if prev_rec != {}:
+        if prev_rec != {} and test_it < len(prev_rec['success']):
+            print('using saved solution {}'.format(test_it))
             tmp_rec = {k: prev_rec[k][test_it] for k in prev_rec}
         elif method == 'fclgradfree':
+            print('solving query {} with fclgradfree'.format(test_it))
             tmp_rec = gradient_free_traj_optimize(robot, lambda cfg: fcl_checker.predict(cfg, distance=False), start_cfg, target_cfg, options=options)
         elif method == 'fcldist':
             tmp_rec = gradient_free_traj_optimize(robot, fcl_checker.score, start_cfg, target_cfg, options=options)
@@ -716,6 +724,9 @@ def test_one_env(env_name, method, folder, args: ExpConfigs, prev_rec={}):
         elif method == 'diffcogradfree':
             with torch.no_grad():
                 tmp_rec = gradient_free_traj_optimize(robot, dist_est, start_cfg, target_cfg, options=options)
+        elif method == 'margindiffcogradfree':
+            with torch.no_grad():
+                tmp_rec = gradient_free_traj_optimize(robot, lambda cfg: dist_est(cfg)-options['safety_margin'], start_cfg, target_cfg, options=options)
         elif method == 'givengrad':
             tmp_rec = givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options=options)
         else:
@@ -728,23 +739,27 @@ def test_one_env(env_name, method, folder, args: ExpConfigs, prev_rec={}):
             return torch.all((control_points[1:]-control_points[:-1]).pow(2).sum(dim=2)-1.5**2 <= 0).item()
         def con_collision_free(p):
             return torch.all(fcl_checker.predict(p, distance=False) < 0).item()
+        def con_dist_collision_free(p):
+            return torch.all(fcl_checker.score(p) < 0).item()
+            # return True
         def con_joint_limit(p):
             return (torch.all(robot.limits[:, 0]-p <= 0) and torch.all(p-robot.limits[:, 1] <= 0)).item()
 
-        def validate(solution):
+        def validate(solution, method=None):
             veri_cfgs = [utils.anglin(q1, q2, args.validate_density, endpoint=False)\
                 for q1, q2 in zip(solution[:-1], solution[1:])]
             veri_cfgs = torch.cat(veri_cfgs, 0)
-            collosion_free = con_collision_free(veri_cfgs) # torch.all(fcl_checker.predict(veri_cfgs, distance=False) < 0).item()
+            collision_free = con_collision_free(veri_cfgs) if method != 'fcldist' else con_dist_collision_free(veri_cfgs)# torch.all(fcl_checker.predict(veri_cfgs, distance=False) < 0).item()
             sol_tensor = torch.FloatTensor(solution)
             within_jointlimit = con_joint_limit(sol_tensor)
             within_movelimit = con_max_move(sol_tensor)
             # withinlimit = torch.all(robot.limits[:, 0] <= torch.FloatTensor(tmp_rec['solution'])).item() \
             #     and torch.all(torch.FloatTensor(tmp_rec['solution']) <= robot.limits[:, 1]).item()
-            return collosion_free and within_jointlimit and within_movelimit
+            return collision_free and within_jointlimit and within_movelimit
         
         if 'fcl' in method and args.validate_density == 1: # skip validation if using fcl and density is only 1
             val_t = 0
+            tmp_rec['success'] = validate(tmp_rec['solution'], method=method) # This is only temporary
         else:
             val_t = time()
             tmp_rec['success'] = validate(tmp_rec['solution'])
@@ -752,10 +767,12 @@ def test_one_env(env_name, method, folder, args: ExpConfigs, prev_rec={}):
         tmp_rec['val_time'] = val_t
 
         for k in tmp_rec:
+            if 'repair_' in k:
+                continue
             test_rec[k].append(tmp_rec[k])
         
         # Repair
-        if not tmp_rec['success'] and method != 'fcldist':
+        if not tmp_rec['success'] and 'fcl' not in method:
             repair_rec = gradient_free_traj_optimize(robot, fcl_checker.score, start_cfg, target_cfg, 
                 options={**repair_options, 'init_solution': torch.DoubleTensor(tmp_rec['solution'])})
             # repair_rec['success'] = validate(repair_rec['solution']) # validation not needed
@@ -770,17 +787,18 @@ def test_one_env(env_name, method, folder, args: ExpConfigs, prev_rec={}):
         for k in ['cnt_check', 'cost', 'time', 'success', 'solution']:
             test_rec['repair_'+k].append(repair_rec[k])
         
-        cfg_path_plots = []
-        if robot.dof > 2:
-            fig, ax, link_plot, joint_plot, eff_plot = create_plots(robot, obstacles, dist_est, checker)
-        elif robot.dof == 2:
-            fig, ax, link_plot, joint_plot, eff_plot, cfg_path_plots = create_plots(robot, obstacles, dist_est, checker)
-        single_plot(robot, torch.FloatTensor(test_rec['repair_solution'][-1]), fig, link_plot, joint_plot, eff_plot, cfg_path_plots=cfg_path_plots, ax=ax)
-        debug_dir = join('debug', exp_name, method)
-        if not isdir(debug_dir):
-            os.makedirs(debug_dir)
-        plt.savefig(join(debug_dir, 'debug_view_{}.png'.format(test_it)), dpi=500)
-        plt.close()
+        # ================Visualize for debugging purposes===================
+        # cfg_path_plots = []
+        # if robot.dof > 2:
+        #     fig, ax, link_plot, joint_plot, eff_plot = create_plots(robot, obstacles, dist_est, checker)
+        # elif robot.dof == 2:
+        #     fig, ax, link_plot, joint_plot, eff_plot, cfg_path_plots = create_plots(robot, obstacles, dist_est, checker)
+        # single_plot(robot, torch.FloatTensor(test_rec['repair_solution'][-1]), fig, link_plot, joint_plot, eff_plot, cfg_path_plots=cfg_path_plots, ax=ax)
+        # debug_dir = join('debug', exp_name, method)
+        # if not isdir(debug_dir):
+        #     os.makedirs(debug_dir)
+        # plt.savefig(join(debug_dir, 'debug_view_{}.png'.format(test_it)), dpi=500)
+        # plt.close()
 
         # break # debugging
 
@@ -820,11 +838,22 @@ def main(method, exp_name, override=False, args=None):
                 all_rec = json.load(f)
             if method in all_rec and args.load_exp is None:
                 continue
+            elif hasattr(args, 'only_repair') and args.only_repair and method in all_rec and 'repair_success' in all_rec[method]:
+                assert method in all_rec and all_rec[method] != {}
+                continue
         else:
             assert args.load_exp is None, \
                 'Trying to load experiment {}, but the result file {} does not exist'.format(args.load_exp, restore_rec_file)
             all_rec = {}
-        test_rec = test_one_env(env_name, method=method, folder=data_folder, args=args, prev_rec=all_rec[method])
+        
+        # if all_rec != {}:
+        #     print('Env {} missing Method {}, redoing now...'.format(env_name, method))
+        #     # continue
+        # if method == 'fcldist' and '10obs' not in env_name:
+        #     # This is just temporary!!
+        #     print('Skipping {}, {}'.format(env_name, method))
+        #     continue
+        test_rec = test_one_env(env_name, method=method, folder=data_folder, args=args, prev_rec=all_rec[method] if args.load_exp != None else {})
         
         rec_file = os.path.join(res_folder, env_name+'.json')
         all_rec[method] = test_rec
@@ -863,12 +892,13 @@ if __name__ == "__main__":
     #     et = time()
     #     print('Method {}, Exp {}, time = {:.3f} secs'.format(m, exp_name, et-st))
     
-    exps = ['2d_2dof_exp2', '2d_3dof_exp2', '2d_7dof_exp2'] #['2d_2dof_exp1', '2d_3dof_exp1', '2d_7dof_exp1'] #, '2d_3dof_exp1'
-    load_exps = ['2d_2dof_exp1', '2d_3dof_exp1', '2d_7dof_exp1']
+    exps = ['2d_2dof_exp4', '2d_3dof_exp4', '2d_7dof_exp4'] # ['2d_2dof_exp2', '2d_3dof_exp2', #['2d_2dof_exp1', '2d_3dof_exp1', '2d_7dof_exp1'] #, '2d_3dof_exp1'
+    load_exps = ['2d_2dof_exp4', '2d_3dof_exp4', '2d_7dof_exp4'] # ['2d_2dof_exp2', '2d_3dof_exp2', '2d_7dof_exp2'] # [None, None, None] # 
     import diffco as Fastronpp
-    methods = ['diffco', 'givengrad', 'bidiffco'] #'diffco', 'givengrad', 'bidiffco', 'fclgradfree'
+    methods = ['fcldist'] # ['fclgradfree'] # ['margindiffcogradfree', 'fcldist'] # ['margindiffcogradfree'] # ['diffco', 'givengrad', 'bidiffco'] # ['diffcogradfree', 'fcldist'] #  #'diffco', 'givengrad', 'bidiffco', 'fclgradfree'
     res = {}
-    for exp_name, loadexp in zip(exps, load_exps):
+    for exp_name, loadexp in tqdm(list(zip(exps, load_exps))):
+        assert loadexp == None or loadexp == exp_name
         res[exp_name] = {}
         for m in methods:
             st = time()
@@ -877,6 +907,7 @@ if __name__ == "__main__":
                 include_validate_time=True,
                 use_previous_solution=True,
                 validate_density=1,
+                only_repair=False, # Only add repair for several previous experiments
             )
             args=ExpConfigs(args)
             main(m, exp_name, override=True, args=args)
