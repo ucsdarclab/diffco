@@ -2,7 +2,6 @@ import sys
 import json
 import os
 from os.path import basename, splitext, join, isdir
-# sys.path.append('/home/yuheng/DiffCo/')
 from diffco import DiffCo, MultiDiffCo
 from diffco import kernel
 from matplotlib import pyplot as plt
@@ -168,7 +167,7 @@ def single_plot(robot, p, fig, link_plot, joint_plot, eff_plot, cfg_path_plots=N
 
     # plt.show()
 
-def adam_traj_optimize(robot, dist_est, start_cfg, target_cfg, options): # history=False):
+def adam_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
     N_WAYPOINTS = options['N_WAYPOINTS'] # 20
     NUM_RE_TRIALS = options['NUM_RE_TRIALS'] # 10
     MAXITER = options['MAXITER'] # 200
@@ -178,7 +177,7 @@ def adam_traj_optimize(robot, dist_est, start_cfg, target_cfg, options): # histo
     max_move_weight = 10
     collision_weight = 10
     joint_limit_weight = 10
-    safety_margin = options['safety_margin'] # torch.FloatTensor([-8.0, -0.8]) #
+    safety_margin = options['safety_margin']
     lr = 5e-1
     seed = options['seed']
     torch.manual_seed(seed)
@@ -213,7 +212,6 @@ def adam_traj_optimize(robot, dist_est, start_cfg, target_cfg, options): # histo
         init_path[-1] = target_cfg
         p = init_path.requires_grad_(True)
         opt = torch.optim.Adam([p], lr=lr)
-        # opt = torch.optim.SGD([p], lr=lr, momentum=0.0)
 
         for step in range(MAXITER):
             opt.zero_grad()
@@ -223,9 +221,7 @@ def adam_traj_optimize(robot, dist_est, start_cfg, target_cfg, options): # histo
             max_move_cost = torch.clamp((control_points[1:]-control_points[:-1]).pow(2).sum(dim=2)-1.5**2, min=0).sum()
             joint_limit_cost = (
                 torch.clamp(robot.limits[:, 0]-p, min=0) + torch.clamp(p-robot.limits[:, 1], min=0)).sum()
-            diff = (control_points[1:]-control_points[:-1]).pow(2).sum() # + (control_points[2:]-2*control_points[1:-1] + control_points[:-2]).pow(2).sum()
-            # np.clip(1.5*float(i)/UPDATE_STEPS, 0, 1)**2 (float(i)/UPDATE_STEPS) * 
-            # torch.clamp(utils.wrap2pi(p[1:]-p[:-1]).abs(), min=0.3).pow(2).sum()
+            diff = (control_points[1:]-control_points[:-1]).pow(2).sum()
             constraint_loss = collision_weight * collision_score\
                 + max_move_weight * max_move_cost + joint_limit_weight * joint_limit_cost
             objective_loss = dif_weight * diff
@@ -286,7 +282,6 @@ def adam_traj_optimize(robot, dist_est, start_cfg, target_cfg, options): # histo
         'target_cfg': target_cfg.numpy().tolist(),
         'cnt_check': cnt_check,
         'cost': solution_obj.item(),
-        # 'cons_violation': None,
         'time': end_t - start_t,
         'success': found,
         'seed': seed,
@@ -314,24 +309,16 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
         p = torch.DoubleTensor(p).reshape([-1, robot.dof])
         p[:] = utils.wrap2pi(p)
         var_p = torch.cat([init_path[:1], p, init_path[-1:]], dim=0).requires_grad_(True)
-        # opt = torch.optim.Adam([var_p]) # just to use zero_grad
         return var_p
 
     def con_max_move(p):
-        # global call_cnt
-        # print('max_move {}'.format(call_cnt))
-        # call_cnt += 1
         global max_move_cost, var_p_max_move, latest_p_max_move
         var_p_max_move = pre_process(p)
         latest_p_max_move = var_p_max_move.data[1:-1].numpy().reshape(-1)
         control_points = robot.fkine(var_p_max_move)
-        max_move_cost = -torch.clamp_((control_points[1:]-control_points[:-1]).pow(2).sum(dim=2)-1.5**2, min=0).sum()#\
-            # -torch.clamp((utils.wrap2pi(var_p_max_move[1:]-var_p_max_move[:-1])).pow(2).sum(dim=1)-(15*np.pi/180)**2, min=0).sum() # DEBUG. No angle loss before.
+        max_move_cost = -torch.clamp_((control_points[1:]-control_points[:-1]).pow(2).sum(dim=2)-1.5**2, min=0).sum()
         return max_move_cost.data.numpy()
     def grad_con_max_move(p):
-        # global call_cnt
-        # print('grad_max_move {}'.format(call_cnt))
-        # call_cnt += 1
         if all(p == latest_p_max_move):
             # opt.zero_grad()
             var_p_max_move.grad = None
@@ -343,22 +330,14 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
             raise ValueError('p is not the same as the lastest passed p')
 
     def con_collision_free(p):
-        # global call_cnt
-        # print('collision {}'.format(call_cnt))
-        # call_cnt += 1
         global cnt_check, collision_cost, var_p_collision, latest_p_collision
         var_p_collision = pre_process(p)
         latest_p_collision = var_p_collision.data[1:-1].numpy().reshape(-1)
-        # print(torch.min(-checker(p)).numpy().dtype)
         cnt_check += len(p)
         collision_cost = torch.sum(-torch.clamp_(dist_est(var_p_collision[1:-1])-safety_margin, min=0))
         return collision_cost.data.numpy()
     def grad_con_collision_free(p):
-        # global call_cnt
-        # print('grad_collision {}'.format(call_cnt))
-        # call_cnt += 1
         if all(p == latest_p_collision):
-            # opt.zero_grad()
             var_p_collision.grad = None
             collision_cost.backward()
             if var_p_collision.grad is None:
@@ -368,20 +347,13 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
             raise ValueError('p is not the same as the lastest passed p')
 
     def con_joint_limit(p):
-        # global call_cnt
-        # print('joint_limit {}'.format(call_cnt))
-        # call_cnt += 1
         global joint_limit_cost, var_p_limit, latest_p_limit
         var_p_limit = pre_process(p)
         latest_p_limit = var_p_limit.data[1:-1].numpy().reshape(-1)
-        # print(np.float(torch.all(robot.limits[:, 0] < p) and torch.all(p < robot.limits[:, 1])))
         joint_limit_cost = -torch.sum(torch.clamp_(robot.limits[:, 0]-var_p_limit, min=0)\
              + torch.clamp_(var_p_limit-robot.limits[:, 1], min=0))
         return joint_limit_cost.data.numpy()
     def grad_con_joint_limit(p):
-        # global call_cnt
-        # print('grad_joint_limit {}'.format(call_cnt))
-        # call_cnt += 1
         if all(p == latest_p_limit):
             # opt.zero_grad()
             var_p_collision.grad = None
@@ -396,13 +368,11 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
         global obj, var_p_cost, latest_p_cost
         var_p_cost = pre_process(p)
         latest_p_cost = var_p_cost.data[1:-1].numpy().reshape(-1)
-        # p_tensor = torch.from_numpy(p).reshape([-1, 2])
         control_points = robot.fkine(var_p_cost)
         obj = (control_points[1:]-control_points[:-1]).pow(2).sum()
         return obj.data.numpy()
     def grad_cost(p):
         if np.allclose(p, latest_p_cost):
-            # opt.zero_grad()
             var_p_cost.grad = None
             obj.backward()
             if var_p_cost.grad is None:
@@ -425,10 +395,7 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
             init_path = (torch.rand(N_WAYPOINTS, robot.dof, dtype=torch.float64))*np.pi*2-np.pi
         init_path[0] = start_cfg
         init_path[-1] = target_cfg
-        # p = init_path.requires_grad_(True)
         res = fmin(cost, init_path[1:-1].reshape(-1).numpy(), jac=grad_cost,
-            # method='trust-constr',
-            # method='Nelder-Mead',
             method='slsqp',
             constraints=[
                 {'fun': con_max_move, 'type': 'ineq', 'jac': grad_con_max_move},
@@ -436,21 +403,17 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
                 {'fun': con_joint_limit, 'type': 'ineq', 'jac': grad_con_joint_limit}
             ],
             options={'maxiter': MAXITER, 'disp': False})
-        # print(res)
         if res.success:
             success = True
             break
     end_t = time()
     res.x = res.x.reshape([-1, robot.dof])
-    # print('Collision constraint: ', con_collision_free(res.x))
     res.x = pre_process(res.x)
-    # print(res)
     rec = {
         'start_cfg': start_cfg.numpy().tolist(),
         'target_cfg': target_cfg.numpy().tolist(),
         'cnt_check': cnt_check,
         'cost': res.fun.item(),
-        # 'cons_violation': None,
         'time': end_t - start_t,
         'success': success,
         'seed': seed,
@@ -458,7 +421,7 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
     }
     return rec
 
-def gradient_free_traj_optimize(robot, checker, start_cfg, target_cfg, options=None): #, history=False):
+def gradient_free_traj_optimize(robot, checker, start_cfg, target_cfg, options=None):
     N_WAYPOINTS = options['N_WAYPOINTS']
     NUM_RE_TRIALS = options['NUM_RE_TRIALS']
     MAXITER = options['MAXITER']
@@ -482,27 +445,17 @@ def gradient_free_traj_optimize(robot, checker, start_cfg, target_cfg, options=N
     def con_collision_free(p):
         global cnt_check
         p = pre_process(p)
-        # print(torch.min(-checker(p)).numpy().dtype)
         cnt_check += len(p)
         return torch.sum(-torch.clamp_(checker(p), min=0)).numpy()
     def con_joint_limit(p):
         p = pre_process(p)
-        # print(np.float(torch.all(robot.limits[:, 0] < p) and torch.all(p < robot.limits[:, 1])))
         return -torch.sum(torch.clamp_(robot.limits[:, 0]-p, min=0) + torch.clamp_(p-robot.limits[:, 1], min=0)).numpy()
     def cost(p):
         p_tensor = pre_process(p)
-        # p_tensor = torch.from_numpy(p).reshape([-1, 2])
         control_points = robot.fkine(p_tensor)
         diff = (control_points[1:]-control_points[:-1]).pow(2).sum()
         return diff.numpy()
 
-    # def cost_test(x):
-    #     return (x**2).sum()
-    # def con_test(x):
-    #     return (x**3).sum() - 10
-    # res = fmin(cost_test, torch.FloatTensor([0.1]), constraints=[
-    #     {'fun': con_test, 'type': 'ineq'}],
-    #     options={'maxiter': 1000})
     start_t = time()
     success = False
     for trial_time in range(NUM_RE_TRIALS):
@@ -516,31 +469,25 @@ def gradient_free_traj_optimize(robot, checker, start_cfg, target_cfg, options=N
             init_path = (torch.rand(N_WAYPOINTS, robot.dof, dtype=torch.float64))*np.pi*2-np.pi
         init_path[0] = start_cfg
         init_path[-1] = target_cfg
-        # p = init_path.requires_grad_(True)
         res = fmin(cost, init_path[1:-1].reshape(-1).numpy(), 
-            # method='trust-constr',
-            # method='Nelder-Mead',
             constraints=[
                 {'fun': con_max_move, 'type': 'ineq'},
                 {'fun': con_collision_free, 'type': 'ineq'},
                 {'fun': con_joint_limit, 'type': 'ineq'}
             ],
             options={'maxiter': MAXITER, 'disp': False})
-        # print(res)
         if res.success:
             success = True
             break
     end_t = time()
+
     res.x = res.x.reshape([-1, robot.dof])
-    # print('Collision constraint: ', con_collision_free(res.x))
     res.x = utils.wrap2pi(pre_process(res.x))
-    # print(res)
     rec = {
         'start_cfg': start_cfg.numpy().tolist(),
         'target_cfg': target_cfg.numpy().tolist(),
         'cnt_check': cnt_check,
         'cost': res.fun.item(),
-        # 'cons_violation': None,
         'time': end_t - start_t,
         'success': success,
         'seed': seed,
@@ -683,7 +630,6 @@ def test_one_env(env_name, method, folder, args: ExpConfigs, prev_rec={}):
         'repair_cnt_check': [],
         'cost': [],
         'repair_cost': [],
-        # 'cons_violation': [],
         'time': [],
         'val_time': [],
         'repair_time': [],
@@ -700,10 +646,6 @@ def test_one_env(env_name, method, folder, args: ExpConfigs, prev_rec={}):
         t_cfgs = torch.FloatTensor(test_cfg_dataset['target_cfgs'])[:10]
         assert env_name == test_cfg_dataset['env_name']
     if prev_rec != {}:
-        # s_cfgs = torch.FloatTensor(test_cfg_dataset['start_cfgs'])[:len(prev_rec['success'])]
-        # t_cfgs = torch.FloatTensor(test_cfg_dataset['target_cfgs'])[:len(prev_rec['success'])]
-        # assert len(s_cfgs) == len(prev_rec['success']) and len(t_cfgs) == len(prev_rec['success'])
-
         rec_s_cfgs = torch.FloatTensor(prev_rec['solution'])[:, 0]
         rec_t_cfgs = torch.FloatTensor(prev_rec['solution'])[:, -1]
         assert torch.all(torch.isclose(rec_s_cfgs, s_cfgs[:len(rec_s_cfgs)])) and torch.all(torch.isclose(rec_t_cfgs, t_cfgs[:len(rec_t_cfgs)]))
@@ -749,17 +691,15 @@ def test_one_env(env_name, method, folder, args: ExpConfigs, prev_rec={}):
             veri_cfgs = [utils.anglin(q1, q2, args.validate_density, endpoint=False)\
                 for q1, q2 in zip(solution[:-1], solution[1:])]
             veri_cfgs = torch.cat(veri_cfgs, 0)
-            collision_free = con_collision_free(veri_cfgs) if method != 'fcldist' else con_dist_collision_free(veri_cfgs)# torch.all(fcl_checker.predict(veri_cfgs, distance=False) < 0).item()
+            collision_free = con_collision_free(veri_cfgs) if method != 'fcldist' else con_dist_collision_free(veri_cfgs)
             sol_tensor = torch.FloatTensor(solution)
             within_jointlimit = con_joint_limit(sol_tensor)
             within_movelimit = con_max_move(sol_tensor)
-            # withinlimit = torch.all(robot.limits[:, 0] <= torch.FloatTensor(tmp_rec['solution'])).item() \
-            #     and torch.all(torch.FloatTensor(tmp_rec['solution']) <= robot.limits[:, 1]).item()
             return collision_free and within_jointlimit and within_movelimit
         
         if 'fcl' in method and args.validate_density == 1: # skip validation if using fcl and density is only 1
             val_t = 0
-            tmp_rec['success'] = validate(tmp_rec['solution'], method=method) # This is only temporary
+            # tmp_rec['success'] = validate(tmp_rec['solution'], method=method) # This is only temporary
         else:
             val_t = time()
             tmp_rec['success'] = validate(tmp_rec['solution'])
@@ -805,10 +745,6 @@ def test_one_env(env_name, method, folder, args: ExpConfigs, prev_rec={}):
     return test_rec
 
 def main(method, exp_name, override=False, args=None):
-    # method = 'fclgradfree'
-    # method = 'diffco'
-    # method = 'givengrad'
-
     if args.load_exp is not None:
         print('Loading experiment results from {}'.format(args.load_exp))
     data_folder = join('data', exp_name if args.load_exp is None else args.load_exp)
@@ -884,17 +820,12 @@ def additional_timing(method, exp_name):
 
 
 if __name__ == "__main__":
-    # exp_name = '2d_2dof_exp1'
-    # methods = ['fclgradfree'] #, 'diffco', 'givengrad', 'bidiffco', 'fclgradfree']
-    # for m in methods:
-    #     st = time()
-    #     main(m, exp_name, override=False)
-    #     et = time()
-    #     print('Method {}, Exp {}, time = {:.3f} secs'.format(m, exp_name, et-st))
-    
-    exps = ['2d_2dof_exp4', '2d_3dof_exp4', '2d_7dof_exp4'] # ['2d_2dof_exp2', '2d_3dof_exp2', #['2d_2dof_exp1', '2d_3dof_exp1', '2d_7dof_exp1'] #, '2d_3dof_exp1'
-    load_exps = ['2d_2dof_exp4', '2d_3dof_exp4', '2d_7dof_exp4'] # ['2d_2dof_exp2', '2d_3dof_exp2', '2d_7dof_exp2'] # [None, None, None] # 
-    import diffco as Fastronpp
+    # exps contain the names of the data directories
+    exps = ['2d_2dof_exp4', '2d_3dof_exp4', '2d_7dof_exp4']
+
+    # load_exps contain the names of the result directories you want to re-compute.
+    # set to a list of None's when running new experiments
+    load_exps = [None, None, None]
     methods = ['fcldist'] # ['fclgradfree'] # ['margindiffcogradfree', 'fcldist'] # ['margindiffcogradfree'] # ['diffco', 'givengrad', 'bidiffco'] # ['diffcogradfree', 'fcldist'] #  #'diffco', 'givengrad', 'bidiffco', 'fclgradfree'
     res = {}
     for exp_name, loadexp in tqdm(list(zip(exps, load_exps))):
@@ -910,10 +841,12 @@ if __name__ == "__main__":
                 only_repair=False, # Only add repair for several previous experiments
             )
             args=ExpConfigs(args)
-            main(m, exp_name, override=True, args=args)
-            # res[exp_name][m] = additional_timing(m, exp_name)
+            main(m, exp_name, override=True, args=args) # this is the main experiment
+            # res[exp_name][m] = additional_timing(m, exp_name) # This is for additional timing on initial training
             et = time()
             print('Method {}, Exp {}, time = {:.3f} secs'.format(m, exp_name, et-st))
+
+    # This is to print out additional timings
     # for exp_name in exps:
     #     for m in methods:
     #         print('{}, {}:'.format(m, exp_name))

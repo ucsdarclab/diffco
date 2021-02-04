@@ -18,6 +18,11 @@ from diffco import utils
 from diffco.Obstacles import FCLObstacle
 
 def traj_optimize(robot, dist_est, start_cfg, target_cfg, history=False):
+    # There is a slightly different version in speed_compare.py,
+    # which allows using SLSQP instead of Adam, allows
+    # inputting an initial solution other than straight line,
+    # and is better modularly written.
+    # That one with SLSQP is more recommended to use.
     N_WAYPOINTS = 20
     NUM_RE_TRIALS = 10
     UPDATE_STEPS = 200
@@ -41,7 +46,6 @@ def traj_optimize(robot, dist_est, start_cfg, target_cfg, history=False):
     trial_histories = []
 
     found = False
-    # p = torch.FloatTensor(np.concatenate([np.linspace(start_cfg, (-np.pi, 0), N_STEPS/2), np.linspace((np.pi, 0), target_cfg, N_STEPS/2)], axis=0)).requires_grad_(True)
     for trial_time in range(NUM_RE_TRIALS):
         path_history = []
         if trial_time == 0:
@@ -52,17 +56,13 @@ def traj_optimize(robot, dist_est, start_cfg, target_cfg, history=False):
         init_path[-1] = target_cfg
         p = init_path.requires_grad_(True)
         opt = torch.optim.Adam([p], lr=lr)
-        # opt = torch.optim.SGD([p], lr=lr, momentum=0.0)
 
         for step in range(UPDATE_STEPS):
             opt.zero_grad()
             collision_score = torch.clamp(dist_est(p)-safety_margin, min=0).sum()
-            # print(torch.clamp(dist_est(p)-safety_margin, min=0).max(dim=0).values.data)
             control_points = robot.fkine(p)
             max_move_cost = torch.clamp((control_points[1:]-control_points[:-1]).pow(2).sum(dim=2)-0.3**2, min=0).sum()
-            diff = (control_points[1:]-control_points[:-1]).pow(2).sum() # + (control_points[2:]-2*control_points[1:-1] + control_points[:-2]).pow(2).sum()
-            # np.clip(1.5*float(i)/UPDATE_STEPS, 0, 1)**2 (float(i)/UPDATE_STEPS) * 
-            # torch.clamp(utils.wrap2pi(p[1:]-p[:-1]).abs(), min=0.3).pow(2).sum()
+            diff = (control_points[1:]-control_points[:-1]).pow(2).sum()
             constraint_loss = collision_weight * collision_score + max_move_weight * max_move_cost
             objective_loss = dif_weight * diff
             loss = objective_loss + constraint_loss
@@ -110,7 +110,7 @@ def traj_optimize(robot, dist_est, start_cfg, target_cfg, history=False):
         path_history.append(solution)
     else:
         path_history = path_history[:(solution_step+1)]
-    return solution, path_history, solution_trial, solution_step # sum(trial_histories, []),
+    return solution, path_history, solution_trial, solution_step
 
 def animation_demo(robot, p, fig, link_plot, joint_plot, eff_plot, cfg_path_plots=None, path_history=None, save_dir=None):
     global opt, start_frame, cnt_down
@@ -183,7 +183,7 @@ def create_plots(robot, obstacles, dist_est, checker):
         num_class = getattr(checker, 'num_class', 1)
         fig = plt.figure(figsize=(3*(num_class + 1), 3 * num_class))
         gs = fig.add_gridspec(num_class, num_class+1)
-        ax = fig.add_subplot(gs[:, :-1]) #sum([list(range(r*(num_class+1)+1, (r+1)*(num_class+1))) for r in range(num_class)], [])) #, projection='3d'
+        ax = fig.add_subplot(gs[:, :-1])
         cfg_path_plots = []
 
         size = [400, 400]
@@ -203,6 +203,7 @@ def create_plots(robot, obstacles, dist_est, checker):
                 c_ax.scatter(c_support_points[:, 0], c_support_points[:, 1], marker='.', c='black', s=1.5)
                 contour_plot = c_ax.contour(xx, yy, score, levels=[-18, -10, 0, 3.5 if cat==0 else 2.5], linewidths=1, alpha=0.4, colors='k') #-1.5, -0.75, 0, 0.3
                 ax.clabel(contour_plot, inline=1, fmt='%.1f', fontsize=8)
+                # Comment these out if you want colorbars, grad arrows for debugging purposes
                 # fig.colorbar(color_mesh, ax=c_ax)
                 # sparse_score = score[5:-5:10, 5:-5:10]
                 # score_grad_x = -ndimage.sobel(sparse_score.numpy(), axis=1)
@@ -224,10 +225,6 @@ def create_plots(robot, obstacles, dist_est, checker):
                 c_ax.set_xticklabels(['$-\pi$', '$0$', '$\pi$'], fontsize=18)
                 c_ax.set_yticks([-np.pi, 0, np.pi])
                 c_ax.set_yticklabels(['$-\pi$', '$0$', '$\pi$'], fontsize=18)
-                # c_ax.tick_params(direction='in', reset=True)
-                # c_ax.tick_params(which='both', direction='out', length=6, width=2, colors='r',
-                #    grid_color='r', grid_alpha=0.5)
-            # c_ax.set_ticks('')
 
     # Plot ostacles
     # ax.axis('tight')
@@ -245,7 +242,6 @@ def create_plots(robot, obstacles, dist_est, checker):
         elif obs[0] == 'rect':
             ax.add_patch(Rectangle((obs[1][0]-float(obs[2][0])/2, obs[1][1]-float(obs[2][1])/2), obs[2][0], obs[2][1], path_effects=[path_effects.withSimplePatchShadow()], 
             color=cmaps[cat](0.5)))
-            # print((obs[1][0]-obs[2][0]/2, obs[1][1]-obs[2][1]/2))
     
     # Placeholder of the robot plot
     trans = ax.transData.transform
@@ -271,10 +267,7 @@ def single_plot(robot, p, fig, link_plot, joint_plot, eff_plot, cfg_path_plots=N
     link_traj = [ax.plot(points[:, 0], points[:, 1], color='gray', alpha=traj_alpha, lw=lw, solid_capstyle='round')[0] for points in points_traj]
     joint_traj = [ax.plot(points[:-1, 0], points[:-1, 1], 'o', color='tab:red', alpha=traj_alpha, markersize=lw)[0] for points in points_traj]
     eff_traj = [ax.plot(points[-1:, 0], points[-1:, 1], 'o', color='black', alpha=traj_alpha, markersize=lw)[0] for points in points_traj]
-    # for link_plot, joint_plot, eff_plot, points in zip(link_traj, joint_traj, eff_traj, points_traj):
-    #     link_plot.set_data(points[:, 0], points[:, 1])
-    #     joint_plot.set_data(points[:-1, 0], points[:-1, 1])
-    #     eff_plot.set_data(points[-1:, 0], points[-1:, 1])
+
     for i in [0, -1]:
         link_traj[i].set_alpha(ends_alpha)
         link_traj[i].set_path_effects([path_effects.SimpleLineShadow(), path_effects.Normal()])
@@ -282,7 +275,6 @@ def single_plot(robot, p, fig, link_plot, joint_plot, eff_plot, cfg_path_plots=N
         eff_traj[i].set_alpha(ends_alpha)
     link_traj[0].set_color('green')
     link_traj[-1].set_color('orange')
-    # ax.add_artist(link_traj[2])
 
     # def divide(p): # divide the path into several segments that obeys the wrapping around rule [TODO]
     #     diff = torch.abs(p[:-1]-p[1:])
@@ -299,128 +291,54 @@ def single_plot(robot, p, fig, link_plot, joint_plot, eff_plot, cfg_path_plots=N
     # for cfg_path in cfg_path_plots:
     #     cfg_path.set_data(p[:, 0], p[:, 1])
 
-    # ---------Just for making a figure------------
-    segments = [p[:-3], p[-3:]]
-    d1 = segments[0][-1, 0]-(-np.pi)
-    d2 = np.pi - segments[1][0, 0]
-    dh = segments[1][0, 1] - segments[0][-1, 1]
-    intery = segments[0][-1, 1] + dh/(d1+d2)*d1
-    segments[0] = torch.cat([segments[0], torch.FloatTensor([[-np.pi, intery]])])
-    segments[1] = torch.cat([torch.FloatTensor([[np.pi, intery]]), segments[1]])
-    for cfg_path in cfg_path_plots:
-        for seg in segments:
-            cfg_path.axes.plot(seg[:, 0], seg[:, 1], '-o', c='olivedrab', alpha=0.5, markersize=3)
-    # ---------------------------------------------
+    # ---------Just for making the opening figure------------
+    # For a better way wrap around trajectories in angular space
+    # see active.py
 
-    # plt.show()
+    # segments = [p[:-3], p[-3:]]
+    # d1 = segments[0][-1, 0]-(-np.pi)
+    # d2 = np.pi - segments[1][0, 0]
+    # dh = segments[1][0, 1] - segments[0][-1, 1]
+    # intery = segments[0][-1, 1] + dh/(d1+d2)*d1
+    # segments[0] = torch.cat([segments[0], torch.FloatTensor([[-np.pi, intery]])])
+    # segments[1] = torch.cat([torch.FloatTensor([[np.pi, intery]]), segments[1]])
+    # for cfg_path in cfg_path_plots:
+    #     for seg in segments:
+    #         cfg_path.axes.plot(seg[:, 0], seg[:, 1], '-o', c='olivedrab', alpha=0.5, markersize=3)
+    # ---------------------------------------------
 
 def escape(robot, dist_est, start_cfg):
     N_WAYPOINTS = 20
-    # NUM_RE_TRIALS = 10
     UPDATE_STEPS = 200
-    # dif_weight = 1
-    # max_move_weight = 10
-    # collision_weight = 10
-    safety_margin = -0.3 #torch.FloatTensor([-2, -0.2])
+    safety_margin = -0.3
     lr = 5e-2
-    # seed = 19961221
-    # torch.manual_seed(seed)
-
-    # lowest_cost_solution = None
-    # lowest_cost = np.inf
-    # lowest_cost_trial = None
-    # lowest_cost_step = None
-    # best_valid_solution = None
-    # best_valid_cost = np.inf
-    # best_valid_step = None
-    # best_valid_trial = None
-    
-    # trial_histories = []
-
-    # found = False
-    # p = torch.FloatTensor(np.concatenate([np.linspace(start_cfg, (-np.pi, 0), N_STEPS/2), np.linspace((np.pi, 0), target_cfg, N_STEPS/2)], axis=0)).requires_grad_(True)
-    # for trial_time in range(NUM_RE_TRIALS):
     path_history = []
-    # if trial_time == 0:
-    #     init_path = torch.from_numpy(np.linspace(start_cfg, target_cfg, num=UPDATE_STEPS))
-    # else:
-    #     init_path = (torch.rand(N_WAYPOINTS, robot.dof))*np.pi*2-np.pi
     init_path = start_cfg
-    # init_path[-1] = target_cfg
     p = init_path.requires_grad_(True)
     opt = torch.optim.Adam([p], lr=lr)
-    # opt = torch.optim.SGD([p], lr=lr, momentum=0.0)
 
     for step in range(N_WAYPOINTS):
         if step % 1 == 0:
             path_history.append(p.data.clone())
 
         opt.zero_grad()
-        collision_score = dist_est(p)-safety_margin #, min=0).sum()
-        # print(torch.clamp(dist_est(p)-safety_margin, min=0).max(dim=0).values.data)
-        # control_points = robot.fkine(p)
-        # max_move_cost = torch.clamp((control_points[1:]-control_points[:-1]).pow(2).sum(dim=2)-1.0**2, min=0).sum()
-        # diff = dif_weight * (control_points[1:]-control_points[:-1]).pow(2).sum()
-        # np.clip(1.5*float(i)/UPDATE_STEPS, 0, 1)**2 (float(i)/UPDATE_STEPS) * 
-        # torch.clamp(utils.wrap2pi(p[1:]-p[:-1]).abs(), min=0.3).pow(2).sum()
-        # constraint_loss = collision_weight * collision_score + max_move_weight * max_move_cost
-        # objective_loss = dif_weight * diff
-        loss = collision_score #objective_loss + constraint_loss
+        collision_score = dist_est(p)-safety_margin
+        loss = collision_score
         loss.backward()
-        # p.grad[[0, -1]] = 0.0
         opt.step()
         p.data = utils.wrap2pi(p.data)
-        # if history:
-        
-        # if loss.data.numpy() < lowest_cost:
-        #     lowest_cost = loss.data.numpy()
-        #     lowest_cost_solution = p.data.clone()
-        #     lowest_cost_step = step
-        #     lowest_cost_trial = trial_time
         if collision_score <= 1e-4:
-            # if objective_loss.data.numpy() < best_valid_cost:
-            #     best_valid_cost = objective_loss.data.numpy()
-            #     best_valid_solution = p.data.clone()
-            #     best_valid_step = step
-            #     best_valid_trial = trial_time
             break
-        # if constraint_loss <= 1e-2 or step % (UPDATE_STEPS/5) == 0 or step == UPDATE_STEPS-1:
-        #     print('Trial {}: Step {}, collision={:.3f}*{:.1f}, max_move={:.3f}*{:.1f}, diff={:.3f}*{:.1f}, Loss={:.3f}'.format(
-        #         trial_time, step, 
-        #         collision_score.item(), collision_weight,
-        #         max_move_cost.item(), max_move_weight,
-        #         diff.item(), dif_weight,
-        #         loss.item()))
-        # trial_histories.append(path_history)
-        
-        # if best_valid_solution is not None:
-        #     found = True
-        #     break
-    # if not found:
-    #     print('Did not find a valid solution after {} trials!\
-    #         Giving the lowest cost solution'.format(NUM_RE_TRIALS))
-    #     solution = lowest_cost_solution
-    #     solution_step = lowest_cost_step
-    #     solution_trial = lowest_cost_trial
-    # else:
-    #     solution = best_valid_solution
-    #     solution_step = best_valid_step
-    #     solution_trial = best_valid_trial
-    # path_history = trial_histories[solution_trial] # Could be empty when history = false
-    # if not path_history:
-    #     path_history.append(solution)
-    # else:
-    #     path_history = path_history[:(solution_step+1)]
-    return torch.stack(path_history, dim=0)# sum(trial_histories, []),
+    return torch.stack(path_history, dim=0)
 
 def main():
     DOF = 2
-    env_name = '2instance' # '2rect' # '1rect_1circle' '1rect' 'narrow' '2instance'
+    env_name = '2instance'
 
     dataset = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name))
     cfgs = dataset['data']
-    labels = dataset['label'] #[:, 0] #.max(1).values
-    dists = dataset['dist'] #.reshape(-1, 1) #.max(1).values
+    labels = dataset['label']
+    dists = dataset['dist']
     obstacles = dataset['obs']
     obstacles = [obs+(i, ) for i, obs in enumerate(obstacles)]
     print(obstacles)
@@ -443,12 +361,8 @@ def main():
     fitting_target = 'label' # {label, dist, hypo}
     Epsilon = 1 #0.01
     checker.fit_rbf(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine)#, reg=0.09) # epsilon=Epsilon,
-    # checker.fit_rbf(kernel_func=kernel.MultiQuadratic(Epsilon), target=fitting_target, fkine=fkine)
-    # checker.fit_poly(epsilon=Epsilon, target=fitting_target, fkine=fkine)#, lmbd=80)
     dist_est = checker.rbf_score
-    # dist_est = checker.poly_score
     print('MIN_SCORE = {:.6f}'.format(dist_est(cfgs[train_num:]).min()))
-
 
     # return # DEBUGGING
 
@@ -472,28 +386,33 @@ def main():
     target_cfg[0] = 3*np.pi/4 #-np.pi/2 # -15*np.pi/16 #  # #  #np.pi# # # 
     # target_cfg[1] = np.pi/5
 
-    # p, path_history, num_trial, num_step = traj_optimize(
-    #     robot, dist_est, start_cfg, target_cfg, history=True)
-    # with open('results/path_2d_{}dof_{}.json'.format(robot.dof, env_name), 'w') as f:
-    #     json.dump(
-    #         {
-    #             'path': p.data.numpy().tolist(), 
-    #             'path_history': [tmp.data.numpy().tolist() for tmp in path_history],
-    #             'trial': num_trial,
-    #             'step': num_step
-    #         },
-    #         f, indent=1)
-    #     print('Plan recorded in {}'.format(f.name))
+    ## This is for doing traj optimization
+    p, path_history, num_trial, num_step = traj_optimize(
+        robot, dist_est, start_cfg, target_cfg, history=True)
+    with open('results/path_2d_{}dof_{}.json'.format(robot.dof, env_name), 'w') as f:
+        json.dump(
+            {
+                'path': p.data.numpy().tolist(), 
+                'path_history': [tmp.data.numpy().tolist() for tmp in path_history],
+                'trial': num_trial,
+                'step': num_step
+            },
+            f, indent=1)
+        print('Plan recorded in {}'.format(f.name))
+
+    ## This for doing the escaping-from-collision experiment
     # p = escape(robot, dist_est, start_cfg)
     # with open('results/esc_2d_{}dof_{}.json'.format(robot.dof, env_name), 'w') as f:
     #     json.dump({'path': p.data.numpy().tolist(), },f, indent=1)
     #     print('Plan recorded in {}'.format(f.name))
-    with open('results/path_2d_{}dof_{}.json'.format(robot.dof, env_name), 'r') as f:
-        path_dict = json.load(f)
-        p = torch.FloatTensor(path_dict['path'])
-        path_history = [torch.FloatTensor(shot) for shot in path_dict['path_history']] #[p] #
+
+    ## This is for loading previously computed trajectory
+    # with open('results/path_2d_{}dof_{}.json'.format(robot.dof, env_name), 'r') as f:
+    #     path_dict = json.load(f)
+    #     p = torch.FloatTensor(path_dict['path'])
+    #     path_history = [torch.FloatTensor(shot) for shot in path_dict['path_history']] #[p] #
     
-    #animation
+    ## This produces an animation for the trajectory
     # vid_name = None #'results/maual_trajopt_2d_{}dof_{}_fitting_{}_eps_{}_dif_{}_updates_{}_steps_{}.mp4'.format(
     #     # robot.dof, env_name, fitting_target, Epsilon, dif_weight, UPDATE_STEPS, N_STEPS)
     # if robot.dof == 2:
@@ -503,7 +422,7 @@ def main():
     # elif robot.dof == 7:
     #     animation_demo(robot, p, fig, link_plot, joint_plot, eff_plot, save_dir=vid_name)
 
-    # single shot
+    # (Recommended) This produces a single shot of the planned trajectory
     single_plot(robot, p, fig, link_plot, joint_plot, eff_plot, cfg_path_plots=cfg_path_plots, ax=ax)
     # plt.show()
     # plt.savefig('figs/path_2d_{}dof_{}.png'.format(robot.dof, env_name), dpi=500)

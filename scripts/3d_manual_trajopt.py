@@ -16,22 +16,12 @@ import json
 
 import sys
 import pickle
-# sys.path.append('/home/yuheng/DiffCo/')
 from diffco import DiffCo
 from diffco import kernel
 from matplotlib import pyplot as plt
 import numpy as np
 import torch
-# from diffco.model import RevolutePlanarRobot
-# import fcl
-# from scipy import ndimage
-# from matplotlib import animation
-# from matplotlib.patches import Rectangle, FancyBboxPatch, Circle
-# import seaborn as sns
-# sns.set()
-# import matplotlib.patheffects as path_effects
 from diffco import utils
-# from diffco.Obstacles import FCLObstacle
 from diffco.model import BaxterFK
 
 
@@ -126,9 +116,6 @@ class DiffCoplusBaxterExperiments(object):
 
 
     def display_trajectory(self, plan):
-        # Copy class variables to local variables to make the web tutorials more clear.
-        # In practice, you should use the class variables directly unless you have a good
-        # reason not to.
         robot = self.robot
 
         ## BEGIN_SUB_TUTORIAL display_trajectory
@@ -152,9 +139,6 @@ class DiffCoplusBaxterExperiments(object):
 
 
     def wait_for_state_update(self, box_is_known=False, box_is_attached=False, timeout=4):
-        # Copy class variables to local variables to make the web tutorials more clear.
-        # In practice, you should use the class variables directly unless you have a good
-        # reason not to.
         box_name = self.box_name
         scene = self.scene
 
@@ -194,9 +178,6 @@ class DiffCoplusBaxterExperiments(object):
 
 
     def add_box(self, timeout=4):
-        # Copy class variables to local variables to make the web tutorials more clear.
-        # In practice, you should use the class variables directly unless you have a good
-        # reason not to.
         box_name = self.box_name
         scene = self.scene
 
@@ -273,7 +254,7 @@ def traj_optimize(robot, start_cfg, target_cfg, dist_est, initial_guess=None, hi
     max_move_weight = 10
     collision_weight = 10
     joint_limit_weight = 10
-    safety_margin = -1
+    safety_margin = -1 # Corresponds to safety_bias in paper
     lr = 1e-2
     seed = 19961221
     torch.manual_seed(seed)
@@ -303,31 +284,26 @@ def traj_optimize(robot, start_cfg, target_cfg, dist_est, initial_guess=None, hi
         init_path[-1] = target_cfg
         p = init_path.requires_grad_(True)
         opt = torch.optim.Adam([p], lr=lr)
-        # opt = torch.optim.SGD([p], lr=lr, momentum=0.0)
 
         for step in range(UPDATE_STEPS):
             opt.zero_grad()
             assert p.dtype == torch.float
             collision_score = torch.clamp(dist_est(p)-safety_margin, min=0).sum()
-            # max_move_cost = torch.clamp(
-            #     (p[1:]-p[:-1]).pow(2).sum(dim=1)-0.3**2, min=0).sum() # for rbf kernel
             control_points = robot.fkine(p, reuse=True)
             max_move_cost = torch.clamp(
                 (control_points[1:]-control_points[:-1]).pow(2).sum(dim=2)-0.03**2, min=0).sum()
-                # (control_points[1:, -2:-1]-control_points[:-1, -2:-1]).pow(2).sum(dim=2)-0.5**2, min=0).sum()
             joint_limit_cost = (
                 torch.clamp(robot.limits[:, 0]-p, min=0) + torch.clamp(p-robot.limits[:, 1], min=0)).sum()
             diff = (control_points[1:]-control_points[:-1]).pow(2).sum() + (utils.wrap2pi(p[1:]-p[:-1])).pow(2).sum()
-            # diff = (control_points[1:, -2:-1]-control_points[:-1, -2:-1]).pow(2).sum() + (utils.wrap2pi(p[1:]-p[:-1])).pow(2).sum()
 
             constraint_loss = collision_weight * collision_score \
                 + max_move_weight * max_move_cost + joint_limit_weight * joint_limit_cost
             opt_loss = dif_weight * diff
             loss = constraint_loss + opt_loss
             loss.backward()
-            p.grad[[0, -1]] = 0.0
+            p.grad[[0, -1]] = 0.0 # Do not change start and goal configuration
             opt.step()
-            p.data = utils.wrap2pi(p.data)
+            p.data = utils.wrap2pi(p.data) # Do not wrap if your configuration is not angular
             if history:
                 path_history.append(p.data.clone())
             if loss.data.numpy() < lowest_cost:
@@ -373,6 +349,9 @@ def traj_optimize(robot, start_cfg, target_cfg, dist_est, initial_guess=None, hi
     return solution, path_history, solution_trial, solution_step
 
 def animate_path(p, obstacles):
+    # This function is not recommended. 
+    # You should use the single_shot function to display a trajectory
+    # and use the sliding bar to animate it in rViz
     exp = DiffCoplusBaxterExperiments()
     print('Adding box')
     rospy.sleep(2)
@@ -406,6 +385,7 @@ def single_shot(path, obstacles):
     rospy.sleep(2)
 
     box_names = []
+    ## Commented out because assuming obstacles already exist in scene
     # for i, obs in enumerate(obstacles):
     #     box_name = 'box_{}'.format(i)
     #     box_names.append(box_name)
@@ -438,108 +418,32 @@ def single_shot(path, obstacles):
 
 def escape(robot, dist_est, start_cfg):
     N_WAYPOINTS = 20
-    # NUM_RE_TRIALS = 10
     UPDATE_STEPS = 200
-    # dif_weight = 1
-    # max_move_weight = 10
-    # collision_weight = 10
-    safety_margin = -5 #torch.FloatTensor([-2, -0.2])
+    safety_margin = -5 
     lr = 5e-2
-    # seed = 19961221
-    # torch.manual_seed(seed)
-
-    # lowest_cost_solution = None
-    # lowest_cost = np.inf
-    # lowest_cost_trial = None
-    # lowest_cost_step = None
-    # best_valid_solution = None
-    # best_valid_cost = np.inf
-    # best_valid_step = None
-    # best_valid_trial = None
-    
-    # trial_histories = []
-
-    # found = False
-    # p = torch.FloatTensor(np.concatenate([np.linspace(start_cfg, (-np.pi, 0), N_STEPS/2), np.linspace((np.pi, 0), target_cfg, N_STEPS/2)], axis=0)).requires_grad_(True)
-    # for trial_time in range(NUM_RE_TRIALS):
     path_history = []
-    # if trial_time == 0:
-    #     init_path = torch.from_numpy(np.linspace(start_cfg, target_cfg, num=UPDATE_STEPS))
-    # else:
-    #     init_path = (torch.rand(N_WAYPOINTS, robot.dof))*np.pi*2-np.pi
     init_path = start_cfg
-    # init_path[-1] = target_cfg
     p = init_path.requires_grad_(True)
     opt = torch.optim.Adam([p], lr=lr)
-    # opt = torch.optim.SGD([p], lr=lr, momentum=0.0)
 
     for step in range(N_WAYPOINTS):
         if step % 1 == 0:
             path_history.append(p.data.clone())
 
         opt.zero_grad()
-        collision_score = dist_est(p)-safety_margin #, min=0).sum()
-        # print(torch.clamp(dist_est(p)-safety_margin, min=0).max(dim=0).values.data)
-        # control_points = robot.fkine(p)
-        # max_move_cost = torch.clamp((control_points[1:]-control_points[:-1]).pow(2).sum(dim=2)-1.0**2, min=0).sum()
-        # diff = dif_weight * (control_points[1:]-control_points[:-1]).pow(2).sum()
-        # np.clip(1.5*float(i)/UPDATE_STEPS, 0, 1)**2 (float(i)/UPDATE_STEPS) * 
-        # torch.clamp(utils.wrap2pi(p[1:]-p[:-1]).abs(), min=0.3).pow(2).sum()
-        # constraint_loss = collision_weight * collision_score + max_move_weight * max_move_cost
-        # objective_loss = dif_weight * diff
-        loss = collision_score #objective_loss + constraint_loss
+        collision_score = dist_est(p)-safety_margin
+        loss = collision_score 
         loss.backward()
-        # p.grad[[0, -1]] = 0.0
         opt.step()
         p.data = utils.wrap2pi(p.data)
-        # if history:
-        
-        # if loss.data.numpy() < lowest_cost:
-        #     lowest_cost = loss.data.numpy()
-        #     lowest_cost_solution = p.data.clone()
-        #     lowest_cost_step = step
-        #     lowest_cost_trial = trial_time
         if collision_score <= 1e-4:
-            # if objective_loss.data.numpy() < best_valid_cost:
-            #     best_valid_cost = objective_loss.data.numpy()
-            #     best_valid_solution = p.data.clone()
-            #     best_valid_step = step
-            #     best_valid_trial = trial_time
             break
-        # if constraint_loss <= 1e-2 or step % (UPDATE_STEPS/5) == 0 or step == UPDATE_STEPS-1:
-        #     print('Trial {}: Step {}, collision={:.3f}*{:.1f}, max_move={:.3f}*{:.1f}, diff={:.3f}*{:.1f}, Loss={:.3f}'.format(
-        #         trial_time, step, 
-        #         collision_score.item(), collision_weight,
-        #         max_move_cost.item(), max_move_weight,
-        #         diff.item(), dif_weight,
-        #         loss.item()))
-        # trial_histories.append(path_history)
-        
-        # if best_valid_solution is not None:
-        #     found = True
-        #     break
-    # if not found:
-    #     print('Did not find a valid solution after {} trials!\
-    #         Giving the lowest cost solution'.format(NUM_RE_TRIALS))
-    #     solution = lowest_cost_solution
-    #     solution_step = lowest_cost_step
-    #     solution_trial = lowest_cost_trial
-    # else:
-    #     solution = best_valid_solution
-    #     solution_step = best_valid_step
-    #     solution_trial = best_valid_trial
-    # path_history = trial_histories[solution_trial] # Could be empty when history = false
-    # if not path_history:
-    #     path_history.append(solution)
-    # else:
-    #     path_history = path_history[:(solution_step+1)]
-    return torch.stack(path_history, dim=0)# sum(trial_histories, []),
+    return torch.stack(path_history, dim=0)
 
 
 def main():
     robot_name = 'baxter'
     env_name = 'catontable' #'2objontable' #'complex' # 2objontable' # 'table'
-    DOF = 7
 
     dataset = torch.load('data/3d_{}_{}.pt'.format(robot_name, env_name))
     cfgs = dataset['data']
@@ -553,12 +457,11 @@ def main():
     # '''
     #====
     checker = DiffCo(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
-    # checker = DiffCo(obstacles, beta=1.0)
     checker.train(cfgs[:train_num], labels[:train_num], max_iteration=len(cfgs[:train_num]))
     with open('results/checker_3d_{}_{}.p'.format(robot_name, env_name), 'wb') as f:
         pickle.dump(checker, f)
         print('checker saved: {}'.format(f.name))
-    #====
+    #==== The following can be used alone to save training time in debugging
     with open('results/checker_3d_{}_{}.p'.format(robot_name, env_name), 'rb') as f:
         checker = pickle.load(f)
         print('checker loaded: {}'.format(f.name))
@@ -573,10 +476,8 @@ def main():
 
     fitting_target = 'label' # {label, dist, hypo}
     Epsilon = 0.01
-    checker.fit_rbf(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine) # epsilon=Epsilon,
-    # checker.fit_poly(epsilon=Epsilon, target=fitting_target, fkine=fkine)
+    checker.fit_rbf(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine)
     dist_est = checker.rbf_score
-    # spline_func = checker.poly_score
     MIN_SCORE = dist_est(cfgs[train_num:]).min().item()
     print('MIN_SCORE = {}'.format(MIN_SCORE))
 
@@ -584,6 +485,8 @@ def main():
     indices = torch.randint(0, len(free_cfgs), (2, ))
     while indices[0] == indices[1]:
         indices = torch.randint(0, len(free_cfgs), (2, ))
+
+    ## Setting start and target configurations
     # start_cfg = torch.FloatTensor([-39, 40, -111, 81, 4, 29, -136])/180*pi # free_cfgs[indices[0]]
     # start_cfg = torch.FloatTensor([-41, 27, -88, 23, -166, 67, 168])/180*pi # 2obj scene, start from between the objs
     # torch.FloatTensor([25, 31, -120, 58, -66, -8, 116])/180*pi # medium scene
@@ -598,6 +501,7 @@ def main():
     # 
     # torch.FloatTensor([4, 29, -86, 44, 3, 16, -146])/180*pi
     
+    ## This is for trajectory optimization with or w/o an initial guess
     # with open('data/{}_success_1.json'.format(env_name), 'r') as f:
     #     init_guess = torch.FloatTensor(json.load(f)['path'])
     # p, path_history, num_trial, num_step = traj_optimize(robot, start_cfg, target_cfg, dist_est, init_guess, history=True)
@@ -613,6 +517,8 @@ def main():
     #         },
     #         f, indent=1)
     #     print('Plan recorded in {}'.format(f.name))
+
+    ## This is for escaping from high-risk region
     p = escape(robot, dist_est, start_cfg)
     with open('results/path_3d_{}_{}_escape.json'.format(robot_name, env_name), 'w') as f:
         json.dump(
@@ -621,8 +527,8 @@ def main():
             },
             f, indent=1)
         print('Plan recorded in {}'.format(f.name))
-    # '''
 
+    ## This is for loading previous trajectories
     # with open('results/path_3d_{}_{}.json'.format(robot_name, env_name), 'r') as f:
     #     p = torch.FloatTensor(json.load(f)['path'])
     # with open('data/medium_success_2.json', 'r') as f:

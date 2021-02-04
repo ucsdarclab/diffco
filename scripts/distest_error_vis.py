@@ -1,6 +1,10 @@
+'''
+This is a script that comprises several small experiments/demos in the paper.
+The best to use this is to comment/uncomment certain 
+'''
+
 import sys
 import json
-# sys.path.append('/home/yuheng/DiffCo/')
 from diffco import DiffCo, MultiDiffCo
 from diffco import kernel
 from matplotlib import pyplot as plt
@@ -24,7 +28,6 @@ def create_plots(robot, obstacles, dist_est, gt_grid, use3d=False):
         "font.family": "sans-serif",
         "font.sans-serif": ["Helvetica"]})
     gs = fig.add_gridspec(1, 3)
-    # gs = fig.add_gridspec(1, 2) # TEMP
     ax = fig.add_subplot(gs[0, 0])
     ax.set_xlim(-8, 8)
     ax.set_ylim(-8, 8)
@@ -363,7 +366,7 @@ if __name__ == "__main__":
     # plt.xticks(lmbdas)
     # plt.yticks(rs)
     # plt.show()
-    # with open('rvalue_tests.json', 'w') as f:
+    # with open('results/rvalue_tests.json', 'w') as f:
     #     json.dump(
     #         {'lambda': lmbdas.tolist(),
     #         'rvalues': rs}, f)

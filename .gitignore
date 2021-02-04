@@ -10,3 +10,5 @@ figs/
 .ipynb_checkpoints/
 *egg-info
 data_before_renaming/
+matlabcode/
+debug/
