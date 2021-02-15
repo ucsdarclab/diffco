@@ -14,3 +14,7 @@ This is a library of a relatively easy implementation of the differentiable coll
 2. `[2,3]d_data_generation.py` implements how to use MoveIt and FCL to generate the initial dataset for Baxter and Plannar robots, respectively. You may use any of your favourite collision detection library to do this.
 3. `active.py` contains code of the active learning experiment.
 4. `distest_error_vis.py` contains code for a few small experiments/demonstrations in the paper.
+
+## Additional steps for Baxter
+1. Install [MoveIt](https://moveit.ros.org/install/).
+2. To install Baxter configurations, refer to [this tutorial](https://github.com/RethinkRobotics/sdk-docs/wiki/MoveIt-Tutorial) but change the versions of ros according to the one you installed. Note: Ubuntu 20.04 only has ros noetic supported AFAIK, so please do modify command lines from the Baxter tutorial according to the ros version that you installed.
