@@ -1,4 +1,3 @@
-import sys
 import json
 import os
 from os.path import basename, splitext, join, isdir
@@ -22,6 +21,7 @@ from diffco.FCLChecker import FCLChecker
 from time import time
 from tqdm import tqdm
 
+# A function that controls the style of visualization for debugging.
 def create_plots(robot, obstacles, dist_est, checker):
     from matplotlib.cm import get_cmap
     cmaps = [get_cmap('Reds'), get_cmap('Blues')]
@@ -82,6 +82,8 @@ def create_plots(robot, obstacles, dist_est, checker):
                 # c_ax.tick_params(which='both', direction='out', length=6, width=2, colors='r',
                 #    grid_color='r', grid_alpha=0.5)
             # c_ax.set_ticks('')
+    else:
+        raise NotImplementedError('Unsupported degree of freedom {}'.format(robot.dof))
 
     # Plot ostacles
     # ax.axis('tight')
@@ -298,14 +300,14 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
     seed = options['seed']
     torch.manual_seed(seed)
 
-    global cnt_check, obj, max_move_cost, collision_cost, joint_limit_cost, latest_p, opt, call_cnt
+    global cnt_check, obj, max_move_cost, collision_cost, joint_limit_cost, call_cnt
     global var_p_max_move, var_p_collision, var_p_limit, var_p_cost
     global latest_p_max_move, latest_p_collision, latest_p_limit, latest_p_cost
     cnt_check = 0
     call_cnt = 0
 
     def pre_process(p):
-        global var_p, opt
+        global var_p
         p = torch.DoubleTensor(p).reshape([-1, robot.dof])
         p[:] = utils.wrap2pi(p)
         var_p = torch.cat([init_path[:1], p, init_path[-1:]], dim=0).requires_grad_(True)
@@ -320,7 +322,6 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
         return max_move_cost.data.numpy()
     def grad_con_max_move(p):
         if all(p == latest_p_max_move):
-            # opt.zero_grad()
             var_p_max_move.grad = None
             max_move_cost.backward()
             if var_p_max_move.grad is None:
@@ -355,7 +356,6 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
         return joint_limit_cost.data.numpy()
     def grad_con_joint_limit(p):
         if all(p == latest_p_limit):
-            # opt.zero_grad()
             var_p_collision.grad = None
             joint_limit_cost.backward()
             if var_p_collision.grad is None:
@@ -545,9 +545,8 @@ def test_one_env(env_name, method, folder, args: ExpConfigs, prev_rec={}):
 
         fitting_target = 'label' # {label, dist, hypo}
         Epsilon = 1 #0.01
-        checker.fit_rbf(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine)#, reg=0.09) # epsilon=Epsilon,
-        # checker.fit_rbf(kernel_func=kernel.MultiQuadratic(Epsilon), target=fitting_target, fkine=fkine)
-        # checker.fit_poly(epsilon=Epsilon, target=fitting_target, fkine=fkine)#, lmbd=80)
+        checker.fit_poly(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine)#, reg=0.09) # epsilon=Epsilon,
+        # checker.fit_full_poly(epsilon=Epsilon, target=fitting_target, fkine=fkine)#, lmbd=80)
         # ========================
         # ONLY for additional training timing exp
         # fcl_obs = [FCLObstacle(*param) for param in obstacles]
@@ -596,6 +595,8 @@ def test_one_env(env_name, method, folder, args: ExpConfigs, prev_rec={}):
             obj_by_cls[obj.category].append(obj.cobj)
         for mng, obj_group in zip(obs_managers, obj_by_cls):
             mng.registerObjects(obj_group)
+    else:
+        raise NotImplementedError('Unsupported label_type {}'.format(label_type))
     
     robot_links = robot.update_polygons(cfgs[0])
     robot_manager = fcl.DynamicAABBTreeCollisionManager()
@@ -611,7 +612,7 @@ def test_one_env(env_name, method, folder, args: ExpConfigs, prev_rec={}):
         'NUM_RE_TRIALS': 3,
         'MAXITER': 200,
         'safety_margin': max(1/5*min_score, -0.5),
-        'seed': 19961221,
+        'seed': 1234,
         'history': False
     }
 
@@ -619,7 +620,7 @@ def test_one_env(env_name, method, folder, args: ExpConfigs, prev_rec={}):
         'N_WAYPOINTS': 20,
         'NUM_RE_TRIALS': 1, # just one trial
         'MAXITER': 200,
-        'seed': 19961221, # actually not used due to only one trial
+        'seed': 1234, # actually not used due to only one trial
         'history': False,
     }
 
@@ -659,7 +660,7 @@ def test_one_env(env_name, method, folder, args: ExpConfigs, prev_rec={}):
             tmp_rec = gradient_free_traj_optimize(robot, lambda cfg: fcl_checker.predict(cfg, distance=False), start_cfg, target_cfg, options=options)
         elif method == 'fcldist':
             tmp_rec = gradient_free_traj_optimize(robot, fcl_checker.score, start_cfg, target_cfg, options=options)
-        elif method == 'diffco':
+        elif method == 'adamdiffco':
             tmp_rec = adam_traj_optimize(robot, dist_est, start_cfg, target_cfg, options=options)
         elif method == 'bidiffco':
             tmp_rec = gradient_free_traj_optimize(robot, lambda cfg: 2*(dist_est(cfg)>=0).type(torch.FloatTensor)-1, start_cfg, target_cfg, options=options)
@@ -826,7 +827,7 @@ if __name__ == "__main__":
     # load_exps contain the names of the result directories you want to re-compute.
     # set to a list of None's when running new experiments
     load_exps = [None, None, None]
-    methods = ['fcldist'] # ['fclgradfree'] # ['margindiffcogradfree', 'fcldist'] # ['margindiffcogradfree'] # ['diffco', 'givengrad', 'bidiffco'] # ['diffcogradfree', 'fcldist'] #  #'diffco', 'givengrad', 'bidiffco', 'fclgradfree'
+    methods = ['givengrad', 'margindiffcogradfree', 'fcldist'] # ['fclgradfree', 'fcldist', 'margindiffcogradfree', 'adamdiffco', 'bidiffco', 'diffcogradfree']
     res = {}
     for exp_name, loadexp in tqdm(list(zip(exps, load_exps))):
         assert loadexp == None or loadexp == exp_name
@@ -836,12 +837,12 @@ if __name__ == "__main__":
             args = dict(
                 load_exp=loadexp,
                 include_validate_time=True,
-                use_previous_solution=True,
-                validate_density=1,
-                only_repair=False, # Only add repair for several previous experiments
+                use_previous_solution=False, # Set this to False unless you want to load previous solutions
+                validate_density=1, #1 means only check on waypoints. >=2 means also check some intermediate points between waypoints
+                only_repair=False, # This is only to add repair for several previous experiments. Set to False
             )
             args=ExpConfigs(args)
-            main(m, exp_name, override=True, args=args) # this is the main experiment
+            main(m, exp_name, override=False, args=args) # this is the main experiment. Set override=True when filling results in the same directory
             # res[exp_name][m] = additional_timing(m, exp_name) # This is for additional timing on initial training
             et = time()
             print('Method {}, Exp {}, time = {:.3f} secs'.format(m, exp_name, et-st))

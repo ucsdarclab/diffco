@@ -476,7 +476,7 @@ def main():
 
     fitting_target = 'label' # {label, dist, hypo}
     Epsilon = 0.01
-    checker.fit_rbf(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine)
+    checker.fit_poly(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine)
     dist_est = checker.rbf_score
     MIN_SCORE = dist_est(cfgs[train_num:]).min().item()
     print('MIN_SCORE = {}'.format(MIN_SCORE))

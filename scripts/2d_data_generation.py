@@ -174,8 +174,8 @@ if __name__ == "__main__":
 
     # fitting_target = 'label' # {label, dist, hypo}
     # Epsilon = 0.01
-    # checker.fit_rbf(epsilon=Epsilon, target=fitting_target, fkine=fkine)
-    # # checker.fit_poly(k=1, epsilon=Epsilon, target=fitting_target, fkine=fkine)
+    # checker.fit_poly(epsilon=Epsilon, target=fitting_target, fkine=fkine)
+    # # checker.fit_full_poly(k=1, epsilon=Epsilon, target=fitting_target, fkine=fkine)
     # spline_func = checker.rbf_score
     # # spline_func = checker.poly_score
 

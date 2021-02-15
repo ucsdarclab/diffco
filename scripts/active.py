@@ -603,9 +603,9 @@ def main(checking_method='diffco'):
 
     fitting_target = 'dist' # {label, dist, hypo}
     Epsilon = 0.01
-    checker.fit_rbf(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine) # epsilon=Epsilon,
-    # checker.fit_rbf(kernel_func=kernel.MultiQuadratic(Epsilon), target=fitting_target, fkine=fkine)
-    # checker.fit_poly(epsilon=Epsilon, target=fitting_target, fkine=fkine, lmbd=10)
+    checker.fit_poly(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine) # epsilon=Epsilon,
+    # checker.fit_poly(kernel_func=kernel.MultiQuadratic(Epsilon), target=fitting_target, fkine=fkine)
+    # checker.fit_full_poly(epsilon=Epsilon, target=fitting_target, fkine=fkine, lmbd=10)
     dist_est = checker.rbf_score
     init_train_t = time() - init_train_t
     # dist_est = checker.score
@@ -650,7 +650,7 @@ def main(checking_method='diffco'):
 
         checker.train(cfgs, labels, gains=gains, hypothesis=hypothesis, distance=dists) #, kernel_matrix=kernel_matrix
         print('Num of support points {}'.format(len(checker.support_points)))
-        checker.fit_rbf(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine, reg=0.1)
+        checker.fit_poly(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine, reg=0.1)
         update_ts.append(time()-ut)
         
         if checking_method == 'fcl':

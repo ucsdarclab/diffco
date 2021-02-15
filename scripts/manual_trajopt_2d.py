@@ -167,6 +167,7 @@ def animation_demo(robot, p, fig, link_plot, joint_plot, eff_plot, cfg_path_plot
         # plt.axis('tight')
         plt.show()
 
+# A function that controls the style of visualization.
 def create_plots(robot, obstacles, dist_est, checker):
     from matplotlib.cm import get_cmap
     cmaps = [get_cmap('Reds'), get_cmap('Blues')]
@@ -331,6 +332,7 @@ def escape(robot, dist_est, start_cfg):
             break
     return torch.stack(path_history, dim=0)
 
+# Commented out lines include convenient code for debugging purposes
 def main():
     DOF = 2
     env_name = '2instance'
@@ -360,7 +362,7 @@ def main():
 
     fitting_target = 'label' # {label, dist, hypo}
     Epsilon = 1 #0.01
-    checker.fit_rbf(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine)#, reg=0.09) # epsilon=Epsilon,
+    checker.fit_poly(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine)#, reg=0.09) # epsilon=Epsilon,
     dist_est = checker.rbf_score
     print('MIN_SCORE = {:.6f}'.format(dist_est(cfgs[train_num:]).min()))
 

@@ -1,6 +1,6 @@
 '''
 This is a script that comprises several small experiments/demos in the paper.
-The best to use this is to comment/uncomment certain 
+The best to use this is to comment/uncomment certain lines depending on the purpose.
 '''
 
 import sys
@@ -201,9 +201,9 @@ def main(DOF, env_name, lmbda=10):
 
     fitting_target = 'label' # {label, dist, hypo}
     Epsilon = 0.01
-    checker.fit_rbf(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine) # epsilon=Epsilon, 
-    # checker.fit_rbf(kernel_func=kernel.MultiQuadratic(Epsilon), target=fitting_target, fkine=fkine)
-    # checker.fit_poly(epsilon=Epsilon, target=fitting_target, fkine=fkine) #, lmbd=10)
+    checker.fit_poly(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine) # epsilon=Epsilon, 
+    # checker.fit_poly(kernel_func=kernel.MultiQuadratic(Epsilon), target=fitting_target, fkine=fkine)
+    # checker.fit_full_poly(epsilon=Epsilon, target=fitting_target, fkine=fkine) #, lmbd=10)
     dist_est = checker.rbf_score
     #  = checker.score
     # dist_est = checker.poly_score
