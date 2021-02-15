@@ -41,7 +41,7 @@ class DiffCo(CollisionChecker):
         self.distance = distance
         time_start = time()
         if method == 'original':
-            self.train_original(X, y, max_iteration)
+            self.train_perceptron(X, y, max_iteration)
         elif method == 'sgd':
             self.train_sgd(max_iteration)
         elif method == 'svm':
@@ -56,7 +56,7 @@ class DiffCo(CollisionChecker):
         time_elapsed = time() - time_start
         print('{} training done. {:.4f} secs cost'.format(method, time_elapsed))
 
-    def train_original(self, X, y, max_iteration=1000):
+    def train_perceptron(self, X, y, max_iteration=1000):
         # self.y = torch.zeros(len(self.support_points))
         # for i in range(len(self.support_points)):
         #     self.y[i] = 1 if self.gt_checker.is_collision(self.support_points[i]) else -1
@@ -140,7 +140,7 @@ class DiffCo(CollisionChecker):
         # print('Gains: ', self.svm.dual_coef_)
         print('ACC: {}'.format(np.sum((self.svm.predict(self.support_points) > 0) == (self.y > 0)) / len(self.y)))
     
-    def fit_rbf(self, kernel_func=None, target='hypo', fkine=None): #epsilon=None, 
+    def fit_poly(self, kernel_func=None, target='hypo', fkine=None): #epsilon=None, 
         X = self.support_points
         if fkine is not None:
             X = fkine(X).reshape([len(X), -1])
@@ -168,7 +168,7 @@ class DiffCo(CollisionChecker):
             supports = self.support_points
         return torch.matmul(self.rbf_kernel(point, supports), self.rbf_nodes.unsqueeze(1))
     
-    def fit_poly(self, epsilon=1, k=2, lmbd=0, target='hypo', fkine=None):
+    def fit_full_poly(self, epsilon=1, k=2, lmbd=0, target='hypo', fkine=None):
         X = self.support_points
         if fkine is not None:
             X = fkine(X).reshape([len(X), -1])

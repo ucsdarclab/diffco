@@ -12,3 +12,4 @@ figs/
 data_before_renaming/
 matlabcode/
 debug/
+*.pyc

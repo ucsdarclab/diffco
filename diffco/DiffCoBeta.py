@@ -24,7 +24,7 @@ class DiffCoBeta(DiffCo):
         time_start = time()
         self.n_left_out_points = n_left_out_points
         self.distance=d[:-n_left_out_points]
-        self.train_original(X[:-n_left_out_points], (d[:-n_left_out_points]>=0)*2.-1, max_iteration=max_iteration)
+        self.train_perceptron(X[:-n_left_out_points], (d[:-n_left_out_points]>=0)*2.-1, max_iteration=max_iteration)
         if not keep_all:
             # self.gains[self.gains.abs() < 0.005] = 0
             self.support_points = self.support_points[self.gains != 0]
@@ -152,7 +152,7 @@ class DiffCoBeta(DiffCo):
         self.hypothesis = torch.zeros(num_init_points, dtype=X.dtype)
     
     
-    def fit_rbf(self, kernel_func=None, target='hypo', fkine=None): #epsilon=None, 
+    def fit_poly(self, kernel_func=None, target='hypo', fkine=None): #epsilon=None, 
         X = self.support_points
         if fkine is not None:
             X = fkine(X).reshape([len(X), -1])

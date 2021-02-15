@@ -24,7 +24,7 @@ class MultiDiffCo(DiffCo):
         self.train_method = method
         time_start = time()
         if method == 'original':
-            self.train_original(X, y, max_iteration, gains, hypothesis) #, kernel_matrix
+            self.train_perceptron(X, y, max_iteration, gains, hypothesis) #, kernel_matrix
         elif method == 'sgd':
             self.train_sgd(max_iteration)
         elif method == 'svm':
@@ -45,7 +45,7 @@ class MultiDiffCo(DiffCo):
         time_elapsed = time() - time_start
         print('{} training done. {:.4f} secs cost'.format(method, time_elapsed))
 
-    def train_original(self, X, y, max_iteration=1000, gains=None, hypothesis=None): #, kernel_matrix=None):
+    def train_perceptron(self, X, y, max_iteration=1000, gains=None, hypothesis=None): #, kernel_matrix=None):
         self.initialize(X, y, gains=gains, hypothesis=hypothesis)# , kernel_matrix=kernel_matrix)
         complete = torch.zeros(self.num_class, dtype=torch.bool)
 
@@ -119,7 +119,7 @@ class MultiDiffCo(DiffCo):
         # score = self.gains@kernel_values
         return scores
 
-    def fit_rbf(self, kernel_func=None, target='hypo', fkine=None, reg=0):
+    def fit_poly(self, kernel_func=None, target='hypo', fkine=None, reg=0):
         X = self.support_points
         if fkine is not None:
             X = fkine(X).reshape([len(X), -1])
@@ -168,7 +168,7 @@ class MultiDiffCo(DiffCo):
         # return torch.stack(class_scores, dim=1)
         return torch.matmul(self.rbf_kernel(point, supports), self.rbf_nodes)
     
-    def fit_poly(self, epsilon=1, k=2, lmbd=0, target='hypo', fkine=None):
+    def fit_full_poly(self, epsilon=1, k=2, lmbd=0, target='hypo', fkine=None):
         X = self.support_points
         if fkine is not None:
             X = fkine(X).reshape([len(X), -1])
