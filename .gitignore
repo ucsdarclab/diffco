@@ -6,6 +6,7 @@ docker/
 run_image.bash
 data/*/
 figs/
+visual/
 *.png
 .ipynb_checkpoints/
 *egg-info
