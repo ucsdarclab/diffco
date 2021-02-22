@@ -3,6 +3,7 @@ import torch
 import numpy as np
 from numpy import pi
 from scipy.spatial.transform import Rotation
+from .utils import rot_2d
 
 class Model():
     def fkine(self, q):
@@ -60,6 +61,42 @@ class RevolutePlanarRobot(Model):
                 # self.collsion_objs.append(fcl.CollisionObject(obj, fcl.Transform(
                 #     tgm.angle_axis_to_quaternion(torch.FloatTensor([0, 0, angle])), 
                 #     [point[0], point[1], 0])))
+
+        return self.collision_objs
+
+class RigidPlanarBody(Model):
+    def __init__(self, parts, limits=None):
+        self.parts = parts # [({type}, {horizontal_dimension/x}, {vertical dimension/y})]
+        self.dof = 3
+        self.limits = torch.FloatTensor(limits) if limits != None else torch.FloatTensor([[-10, 10], [-10, 10], [-pi, pi]])
+        offsets = []
+        for p in parts:
+            offsets.append(p[1])
+        self.offsets = torch.FloatTensor(offsets).T # 2*M
+        self.collision_objs = None
+    
+    # Assume first two configurations are offsets of (x, y), the third configuration is \theta
+    def fkine(self, q):
+        q = q.reshape((-1, 3))
+        points = rot_2d(q[:, 2]) @ self.offsets + q[:, :2, None] # N*2*M + N*2*1
+        return points.permute((0, 2, 1))
+    
+    @torch.no_grad()
+    def update_polygons(self, q):
+        centers = self.fkine(q)[0]
+        angle = torch.reshape(q, (3, ))[2]
+        if self.collision_objs is None:
+            self.collision_objs = []
+            for trans, p in zip(centers, self.parts):
+                obj = fcl.Box(p[2][0], p[2][1], 1000)
+                self.collision_objs.append(fcl.CollisionObject(obj, fcl.Transform(
+                    Rotation.from_rotvec([0, 0, angle]).as_quat()[[3,0,1,2]], 
+                    [trans[0], trans[1], 0])))
+        else:
+            for obj, trans, in zip(self.collision_objs, centers):
+                obj.setTransform(fcl.Transform(
+                    Rotation.from_rotvec([0, 0, angle]).as_quat()[[3,0,1,2]], 
+                    [trans[0], trans[1], 0]))
 
         return self.collision_objs
 
@@ -130,9 +167,6 @@ class BaxterFK(Model):
                 cum_tfs.append(tmp_tf)
         self.fkine_backup = torch.stack([t[:, :3, 3] for t in cum_tfs], dim=1)
         return self.fkine_backup
-
-
-
 
 
 if __name__ == "__main__":

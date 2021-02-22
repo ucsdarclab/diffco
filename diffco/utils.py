@@ -2,10 +2,25 @@ import torch
 import numpy as np
 
 def rotz(phi):
-    return torch.FloatTensor(
-        [[torch.cos(phi), -torch.sin(phi), 0],
-         [torch.sin(phi), torch.cos(phi), 0],
-         [0, 0, 1]])
+    res = torch.zeros((len(phi), 3, 3))
+    s = torch.sin(phi)
+    c = torch.cos(phi)
+    res[:, 0, 0] = c
+    res[:, 0, 1] = -s
+    res[:, 1, 0] = s
+    res[:, 1, 1] = c
+    res[:, 2, 2] = 1
+    return res
+
+def rot_2d(phi):
+    res = torch.zeros((len(phi), 2, 2))
+    s = torch.sin(phi)
+    c = torch.cos(phi)
+    res[:, 0, 0] = c
+    res[:, 0, 1] = -s
+    res[:, 1, 0] = s
+    res[:, 1, 1] = c
+    return res
 
 # Convert an angle to be between [-pi, pi)
 def wrap2pi(theta):

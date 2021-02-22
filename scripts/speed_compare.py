@@ -392,7 +392,9 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
             else:
                 init_path = torch.from_numpy(np.linspace(start_cfg, target_cfg, num=N_WAYPOINTS, dtype=np.float64))
         else:
-            init_path = (torch.rand(N_WAYPOINTS, robot.dof, dtype=torch.float64))*np.pi*2-np.pi
+            # init_path = (torch.rand(N_WAYPOINTS, robot.dof, dtype=torch.float64))*np.pi*2-np.pi
+            init_path = torch.rand((N_WAYPOINTS, robot.dof)).double()
+            init_path = init_path * (robot.limits[:, 1]-robot.limits[:, 0]) + robot.limits[:, 0]
         init_path[0] = start_cfg
         init_path[-1] = target_cfg
         res = fmin(cost, init_path[1:-1].reshape(-1).numpy(), jac=grad_cost,
@@ -466,7 +468,9 @@ def gradient_free_traj_optimize(robot, checker, start_cfg, target_cfg, options=N
             else:
                 init_path = torch.from_numpy(np.linspace(start_cfg, target_cfg, num=N_WAYPOINTS, dtype=np.float64))
         else:
-            init_path = (torch.rand(N_WAYPOINTS, robot.dof, dtype=torch.float64))*np.pi*2-np.pi
+            # init_path = (torch.rand(N_WAYPOINTS, robot.dof, dtype=torch.float64))*np.pi*2-np.pi
+            init_path = torch.rand((N_WAYPOINTS, robot.dof)).double()
+            init_path = init_path * (robot.limits[:, 1]-robot.limits[:, 0]) + robot.limits[:, 0]
         init_path[0] = start_cfg
         init_path[-1] = target_cfg
         res = fmin(cost, init_path[1:-1].reshape(-1).numpy(), 
