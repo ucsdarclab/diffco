@@ -21,6 +21,7 @@ import matplotlib.patheffects as path_effects
 from time import time
 
 def create_plots(robot, obstacles, dist_est, gt_grid, use3d=False):
+    # Adjust figsize according to your specific arrangement
     fig = plt.figure(figsize=(4*2+0.5, 4 * 1))
     # fig = plt.figure(figsize=(3*2+0.5, 3 * 1)) # temp
     plt.rcParams.update({
@@ -56,9 +57,6 @@ def create_plots(robot, obstacles, dist_est, gt_grid, use3d=False):
     link_plot, = ax.plot(points[:, 0], points[:, 1], color='orange', alpha=1, lw=lw, solid_capstyle='round', path_effects=[path_effects.SimpleLineShadow(), path_effects.Normal()])
     joint_plot, = ax.plot(points[:-1, 0], points[:-1, 1], 'o', color='tab:red', markersize=lw)
     eff_plot, = ax.plot(points[-1:, 0], points[-1:, 1], 'o', color='black', markersize=lw)
-    
-    # ax.axis('off')
-    # return None, None
 
     size = [400, 400]
     yy, xx = torch.meshgrid(torch.linspace(-np.pi, np.pi, size[0]), torch.linspace(-np.pi, np.pi, size[1]))
@@ -71,7 +69,6 @@ def create_plots(robot, obstacles, dist_est, gt_grid, use3d=False):
     c_axes = []
     with sns.axes_style('ticks'):
         for i, d in enumerate([gt_grid, est_grid], 1):
-        # for i, d in enumerate([est_grid], 1): #TEMP
         # for i, d in enumerate([gt_grid], 1): # for clustering
             c_ax = fig.add_subplot(gs[0, i], projection='3d' if use3d else None)
 
@@ -143,23 +140,9 @@ def create_plots(robot, obstacles, dist_est, gt_grid, use3d=False):
 
 def FastronClustering(cfgs, fkine, c_ax):
     from sklearn.cluster import KMeans
-    # N = 1000
     numClusters = 3
     colorarr = ['b','g','r','c','m','y','k','w']
-    # data = np.random.rand(N,2)
-    # data *= np.pi*2
-    # FkData = np.zeros((N,4))
-    # for i in range(N):
-    # 	FkData[i,:] = FkKernel(data[i,0],data[i,1]).T
-
-    # kmeans = KMeans(n_clusters=4, random_state=0).fit(FkData)
     kmeans = KMeans(n_clusters=numClusters).fit(fkine(cfgs).reshape(len(cfgs), -1))
-    # datasets = []
-    # for i in range(numClusters):
-    # 	index = [kmeans.labels_ == i]
-    # 	d = data[tuple(index)]
-    # 	datasets.append(d)
-    # 	plt.scatter(d[:,0],d[:,1],c=colorarr[i])
     size = [400, 400]
     yy, xx = torch.meshgrid(torch.linspace(-np.pi, np.pi, size[0]), torch.linspace(-np.pi, np.pi, size[1]))
     grid_points = torch.stack([xx, yy], axis=2).reshape((-1, 2))
@@ -179,7 +162,7 @@ def main(DOF, env_name, lmbda=10):
     train_num = 6000
     indices = torch.LongTensor(np.random.choice(len(cfgs), train_num, replace=False))
     fkine = robot.fkine
-    '''
+    # '''
     checker = DiffCo(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(lmbda)), beta=1.0) 
     # checker = MultiDiffCo(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
     keep_all = False
@@ -207,25 +190,7 @@ def main(DOF, env_name, lmbda=10):
     dist_est = checker.rbf_score
     #  = checker.score
     # dist_est = checker.poly_score
-    '''
-
-    ''' #==================3-figure compare (work, c space 1, c space 2)==========
-    size = [400, 400]
-    env_name_gt = env_name if 'compare' in env_name else env_name+'_for_compare'
-    gt_grid = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name_gt))['dist']
-    grid_points = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name_gt))['data']
-    raw_grid_score = checker.score(grid_points)
-    raw_grid_score = torch.from_numpy(ndimage.gaussian_filter(raw_grid_score, 1))
-
-    use3d = False
-    dpi=100
-    est, c_axes = create_plots(robot, obstacles, None, None, use3d=use3d) # raw_grid_score)#gt_grid)
-    plt.tight_layout()
-    plt.show()
-    plt.savefig('figs/original_DiffCo_score_compared_{}_dpi{}.jpg'.format('3d' if use3d else '2d', dpi), dpi=dpi, bbox_inches='tight')
-    plt.savefig('figs/robot_gallery/2d_{}dof_{}.jpg'.format(DOF, env_name), dpi=dpi, bbox_inches='tight')
-    plt.savefig('figs/vis_{}.png'.format(env_name), dpi=500)
-    '''
+    # '''
     
     '''# =============== test error ============
     # est = est / est.std() * gt_grid.std()
@@ -233,7 +198,7 @@ def main(DOF, env_name, lmbda=10):
     #     (est-gt_grid).mean(), (est-gt_grid).std(), gt_grid.std()))
     '''
     
-    # ''' new diffco 3-figure compare (work, c space 1, c space 2)==========
+    # ''' diffco 3-figure compare (work, c space 1, c space 2)==========
     from diffco import DiffCo
 
     checker = DiffCo(
@@ -246,34 +211,32 @@ def main(DOF, env_name, lmbda=10):
 
     size = [400, 400]
     env_name_gt = env_name if 'compare' in env_name else env_name+'_for_compare'
-    # gt_grid = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name_gt))['dist']
-    # grid_points = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name_gt))['data']
-    # raw_grid_score = checker.rbf_score(grid_points)
-    # raw_grid_score = torch.from_numpy(ndimage.gaussian_filter(raw_grid_score, 1))
+    gt_grid = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name_gt))['dist']
+    grid_points = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name_gt))['data']
+    raw_grid_score = checker.rbf_score(grid_points)
+    raw_grid_score = torch.from_numpy(ndimage.gaussian_filter(raw_grid_score, 1))
 
-    # use3d = False
-    # # dpi=100
-    # # est, c_axes = create_plots(robot, obstacles, None, None, use3d=use3d) # raw_grid_score)#gt_grid)
-    # est, c_axes = create_plots(robot, obstacles, checker.rbf_score, gt_grid, use3d=use3d) # raw_grid_score)#gt_grid)
-    # c_support_points = checker.support_points
-    # c_axes[1].scatter(c_support_points[:, 0], c_support_points[:, 1], marker='.', c='black', s=1.5)
-    # # plt.tight_layout()
-    # plt.show()
+    use3d = False
+    dpi=100
+    est, c_axes = create_plots(robot, obstacles, checker.rbf_score, gt_grid, use3d=use3d) # raw_grid_score)#gt_grid)
+    c_support_points = checker.support_points
+    c_axes[1].scatter(c_support_points[:, 0], c_support_points[:, 1], marker='.', c='black', s=1.5)
+    plt.tight_layout()
+    plt.show()
     # plt.savefig('figs/original_DiffCo_score_compared_{}_dpi{}.jpg'.format('3d' if use3d else '2d', dpi), dpi=dpi, bbox_inches='tight')
     # plt.savefig('figs/robot_gallery/2d_{}dof_{}.jpg'.format(DOF, env_name), dpi=dpi, bbox_inches='tight')
     # plt.savefig('figs/vis_{}.png'.format(env_name), dpi=500)
     # plt.savefig('figs/new_diffco_vis.png')
-    # '''
     # ''' #===============================
 
-    # ''' =============== correlation ==============
+    ''' =============== correlation ==============
     # gt_grid = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name))['dist']
-    gt_grid = checker.distance
+    # gt_grid = checker.distance
 
     # yy, xx = torch.meshgrid(torch.linspace(-np.pi, np.pi, size[0]), torch.linspace(-np.pi, np.pi, size[1]))
     # grid_points = torch.stack([xx, yy], axis=2).reshape((-1, 2))
     # est_grid = dist_est(cfgs[train_num:])
-    est_grid = dist_est(checker.support_points)
+    # est_grid = dist_est(checker.support_points)
 
     # indices = np.random.choice(range(len(est_grid)), size=400, replace=False)
     # gt_grid = gt_grid[train_num:]
@@ -306,7 +269,7 @@ def main(DOF, env_name, lmbda=10):
     slope, intercept, r_value, p_value, std_err = stats.linregress(est_grid.numpy().reshape(-1), gt_grid.numpy().reshape(-1))
     print('{}DOF, environment {}, with FK {}, r-squared: {}'.format(DOF, env_name, checker.fkine is not None, r_value**2))
     ax.text(xlim_max/4, -7*ylim_max/8, '$\\mathrm{R}^2='+('{:.4f}$'.format(r_value**2)), fontsize=15, 
-        bbox=dict(boxstyle='round', facecolor='wheat', alpha=1))#, fontdict={"family": "Times New Roman",})
+        bbox=dict(boxstyle='round', facecolor='wheat', alpha=1))
     ax.set_title('{} original supports, {} random samples'.format(checker.num_origin_supports, checker.n_left_out_points))
 
     # plt.show()
@@ -314,7 +277,7 @@ def main(DOF, env_name, lmbda=10):
     # plt.savefig('figs/correlation/{}dof_{}_{}.pdf'.format(DOF, env_name, fitting_target))#, dpi=500)
     # plt.savefig('figs/correlation/{}dof_{}_{}_{}_rsquare.png'.format(DOF, env_name, fitting_target, 'woFK' if checker.fkine is None else 'withFK'), dpi=300)
     
-    # ''' 
+    ''' 
 
     ''' timing
     # times = []
