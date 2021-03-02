@@ -3,7 +3,8 @@ import torch
 import numpy as np
 from numpy import pi
 from scipy.spatial.transform import Rotation
-from .utils import rot_2d
+from .utils import rot_2d, euler2mat
+import trimesh
 
 class Model():
     def fkine(self, q):
@@ -69,16 +70,16 @@ class RigidPlanarBody(Model):
         self.parts = parts # [({type}, {horizontal_dimension/x}, {vertical dimension/y})]
         self.dof = 3
         self.limits = torch.FloatTensor(limits) if limits != None else torch.FloatTensor([[-10, 10], [-10, 10], [-pi, pi]])
-        offsets = []
+        keypoints = []
         for p in parts:
-            offsets.append(p[1])
-        self.offsets = torch.FloatTensor(offsets).T # 2*M
+            keypoints.append(p[1])
+        self.keypoints = torch.FloatTensor(keypoints).T # 2*M
         self.collision_objs = None
     
     # Assume first two configurations are offsets of (x, y), the third configuration is \theta
     def fkine(self, q):
         q = q.reshape((-1, 3))
-        points = rot_2d(q[:, 2]) @ self.offsets + q[:, :2, None] # N*2*M + N*2*1
+        points = rot_2d(q[:, 2]) @ self.keypoints + q[:, :2, None] # N*2*M + N*2*1
         return points.permute((0, 2, 1))
     
     @torch.no_grad()
@@ -97,6 +98,46 @@ class RigidPlanarBody(Model):
                 obj.setTransform(fcl.Transform(
                     Rotation.from_rotvec([0, 0, angle]).as_quat()[[3,0,1,2]], 
                     [trans[0], trans[1], 0]))
+
+        return self.collision_objs
+
+class RigidBody(Model):
+    def __init__(self, body_path, keypoints=None, limits=None, transform=None):
+        # Setting keypoints to none means using the corner points as keypoints
+        self.body_path = body_path
+        self.collision_objs = []
+        if '.dae' in body_path:
+            self.mesh = trimesh.load(body_path, force='mesh')
+            if transform is not None:
+                self.mesh.apply_transform(transform)
+            self.collision_objs.append(fcl.CollisionObject(trimesh.collision.mesh_to_BVH(self.mesh)))
+            # self.mesh.show()
+            # open3d_mesh = self.mesh.as_open3d
+            # import open3d as o3d
+            # o3d.visualization.draw_geometries([open3d_mesh])
+            # from utils import open3d_save_image
+            # open3d_save_image([open3d_mesh], '../debug.png')
+        else:
+            self.mesh = trimesh.load(body_path)
+            self.collision_objs.append(fcl.CollisionObject(trimesh.collision.mesh_to_BVH(self.mesh)))
+        self.dof = 6
+        self.limits = torch.FloatTensor(limits) if limits != None else torch.FloatTensor(
+            [[-10, 10], [-10, 10], [-10, 10], [-pi, pi], [-pi, pi], [-pi, pi]])
+        if keypoints is None:
+            self.keypoints = torch.from_numpy(trimesh.bounds.corners(self.mesh.bounds).astype(np.float32)).T # 3*M
+        else:
+            self.keypoints = torch.FloatTensor(keypoints)
+    
+    # Assume first two configurations are offsets of (x, y), the third configuration is \theta
+    def fkine(self, q):
+        q = q.reshape((-1, self.dof))
+        points = euler2mat(q[:, 3:]) @ self.keypoints + q[:, :3, None] # N*2*M + N*2*1
+        return points.permute((0, 2, 1))
+    
+    @torch.no_grad()
+    def update_polygons(self, q):
+        self.collision_objs[0].setTransform(fcl.Transform(
+            Rotation.from_matrix(euler2mat(q[3:])[0].numpy()).as_quat()[[3,0,1,2]], q[:3]))
 
         return self.collision_objs
 
@@ -168,8 +209,7 @@ class BaxterFK(Model):
         self.fkine_backup = torch.stack([t[:, :3, 3] for t in cum_tfs], dim=1)
         return self.fkine_backup
 
-
-if __name__ == "__main__":
+def main():
     lw_data = 0.3
     robot = RevolutePlanarRobot(1, dof=7, link_width=lw_data)
     num_frames = 100
@@ -254,6 +294,14 @@ if __name__ == "__main__":
     plt.show()
 
     # plt.show()
+
+def test_rigid_body():
+    robot = RigidBody('data/Home_env.dae', [[0, 0, 0]])
+
+if __name__ == "__main__":
+    # main() # the main test
+    test_rigid_body() # test if the RigidBody model works
+
 
 
 

@@ -24,7 +24,7 @@ class FCLChecker(CollisionChecker):
         for i, cfg in enumerate(X):
             self.robot.update_polygons(cfg)
             self.robot_manager.update()
-            assert len(self.robot_manager.getObjects()) == self.robot.dof
+            # assert len(self.robot_manager.getObjects()) == self.robot.dof
             for cat, obs_mng in enumerate(self.obs_managers):
                 rdata = fcl.CollisionData(request = req)
                 self.robot_manager.collide(obs_mng, rdata, fcl.defaultCollisionCallback)

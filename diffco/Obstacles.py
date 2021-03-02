@@ -25,7 +25,7 @@ class Obstacle:
         return self.cost
 
 class FCLObstacle:
-    def __init__(self, shape, position, size, category=None):
+    def __init__(self, shape, position, size=None, category=None, **kwargs):
         self.size = size
         self.position = position
         if shape == 'circle':
@@ -34,6 +34,9 @@ class FCLObstacle:
         elif shape == 'rect':
             pos_3d = torch.FloatTensor([position[0], position[1], 0])
             self.geom = fcl.Box(size[0], size[1], 1000)
+        elif shape == 'mesh':
+            pos_3d = torch.FloatTensor(position)
+            self.geom = kwargs['geom']
 
         self.cobj = fcl.CollisionObject(self.geom, fcl.Transform(pos_3d))
         self.category = category
