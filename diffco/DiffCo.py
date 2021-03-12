@@ -181,7 +181,7 @@ class DiffCo(CollisionChecker):
         l1 = torch.cat([phi, X, torch.ones((len(X), 1))], dim=1)
         l2 = torch.cat([X.T, torch.zeros((X.shape[1], X.shape[1]+1))], dim=1)
         l3 = torch.cat([torch.ones((1, len(X))), torch.zeros(1, X.shape[1]+1)], dim=1)
-        print([l.shape for l in [l1, l2, l3]])
+        # print([l.shape for l in [l1, l2, l3]])
         L = torch.cat([l1, l2, l3], dim=0)
         if target == 'hypo':
             y = self.hypothesis
@@ -203,7 +203,7 @@ class DiffCo(CollisionChecker):
             supports = self.support_points
         phi_x = torch.cat(
             [self.poly_kernel(point, supports), point, torch.ones(len(point), 1)], 
-            dim=1) # This needs debugging because kernel value dimension is changed in one version
+            dim=1)
         if phi_x.shape[0] == 1:
             phi_x = phi_x.squeeze_(0)
         return torch.matmul(phi_x, self.poly_nodes)

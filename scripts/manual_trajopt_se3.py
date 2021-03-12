@@ -1,7 +1,7 @@
 from pickle import TRUE
 import sys
 import json
-from diffco import DiffCo, MultiDiffCo
+from diffco import DiffCo, MultiDiffCo, DiffCoBeta
 from diffco import kernel
 from diffco.FCLChecker import FCLChecker
 from matplotlib import pyplot as plt
@@ -124,12 +124,12 @@ def adam_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
     history = options['history']
 
     dif_weight = 1 # This should NOT be changed
-    max_move_weight = 100000
-    collision_weight = 100000
-    joint_limit_weight = 100000
+    max_move_weight = 10 # 100000 for centimeter
+    collision_weight = 30 # 100000
+    joint_limit_weight = 10 # 100000
     safety_margin = options['safety_margin']
     max_speed = options['max_speed']
-    lr = 10
+    lr = 0.1
     seed = options['seed']
     torch.manual_seed(seed)
 
@@ -161,17 +161,18 @@ def adam_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
             init_path = init_path * (robot.limits[:, 1]-robot.limits[:, 0]) + robot.limits[:, 0]
         init_path[0] = start_cfg
         init_path[-1] = target_cfg
-        p_pos = init_path[:, :3].requires_grad_(True)
-        p_ang = init_path[:, 3:].requires_grad_(True)
-        # p = init_path.requires_grad_(True)
-        # opt = torch.optim.Adam([p], lr=lr)
-        opt = torch.optim.Adam([p_pos], lr=lr)
-        opt2 = torch.optim.Adam([p_ang], lr=lr*0.001)
+        # p_pos = init_path[:, :3].requires_grad_(True)
+        # p_ang = init_path[:, 3:].requires_grad_(True)
+        p = init_path.requires_grad_(True)
+        opt = torch.optim.Adam([p], lr=lr)
+        # opt = torch.optim.SGD([p], lr=lr)
+        # opt = torch.optim.Adam([p_pos], lr=lr)
+        # opt2 = torch.optim.Adam([p_ang], lr=lr)
 
         for step in range(MAXITER):
             opt.zero_grad()
-            opt2.zero_grad()
-            p = torch.cat([p_pos, p_ang], dim=1)
+            # opt2.zero_grad()
+            # p = torch.cat([p_pos, p_ang], dim=1)
             collision_score = torch.clamp(dist_est(p)-safety_margin, min=0).sum()
             cnt_check += len(p) # Counting collision checks
             control_points = robot.fkine(p)
@@ -184,14 +185,14 @@ def adam_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
             objective_loss = dif_weight * diff
             loss = objective_loss + constraint_loss
             loss.backward()
-            # p.grad[[0, -1]] = 0.0
-            # p.grad[:, 3:] *= 0.00001
-            p_pos.grad[[0, -1]] = 0.0
-            p_ang.grad[[0, -1]] = 0.0
+            p.grad[[0, -1]] = 0.0
+            # p.grad[:, [0,1,3,4,5]] = 0.0
+            # p_pos.grad[[0, -1]] = 0.0
+            # p_ang.grad[[0, -1]] = 0.0
             opt.step()
-            opt2.step()
-            # p.data[:, 3:] = utils.wrap2pi(p.data[:, 3:]) #! Wrap around specific angular dimensions
-            p_ang.data[:] = utils.wrap2pi(p_ang.data[:])
+            # opt2.step()
+            p.data[:, 3:] = utils.wrap2pi(p.data[:, 3:]) #! Wrap around specific angular dimensions
+            # p_ang.data[:] = utils.wrap2pi(p_ang.data[:])
             if history:
                 path_history.append(p.data.clone())
             if loss.data.numpy() < lowest_loss:
@@ -214,8 +215,8 @@ def adam_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
                     joint_limit_cost.item(), joint_limit_weight,
                     diff.item(), dif_weight,
                     loss.item()))
-            # if constraint_loss <= 1e-2 and torch.norm(p.grad) < 1e-4:
-            if constraint_loss <= 1e-2 and torch.norm(p_pos.grad) < 1e-4 and torch.norm(p_ang.grad) < 1e-4:
+            if constraint_loss <= 1e-2 and torch.norm(p.grad) < 1e-4:
+            # if constraint_loss <= 1e-2 and torch.norm(p_pos.grad) < 1e-4 and torch.norm(p_ang.grad) < 1e-4:
                 break
         trial_histories.append(path_history)
         
@@ -260,6 +261,7 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
     NUM_RE_TRIALS = options['NUM_RE_TRIALS'] # 10
     MAXITER = options['MAXITER'] # 200
     safety_margin = options['safety_margin']
+    max_speed = options['max_speed']
 
     seed = options['seed']
     torch.manual_seed(seed)
@@ -273,7 +275,7 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
     def pre_process(p):
         global var_p
         p = torch.DoubleTensor(p).reshape([-1, robot.dof])
-        p[:, 2] = utils.wrap2pi(p[:, 2])
+        p[:, 3:] = utils.wrap2pi(p[:, 3:])
         var_p = torch.cat([init_path[:1], p, init_path[-1:]], dim=0).requires_grad_(True)
         return var_p
 
@@ -282,17 +284,19 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
         var_p_max_move = pre_process(p)
         latest_p_max_move = var_p_max_move.data[1:-1].numpy().reshape(-1)
         control_points = robot.fkine(var_p_max_move)
-        max_move_cost = -torch.clamp_((control_points[1:]-control_points[:-1]).pow(2).sum(dim=2)-1.5**2, min=0).sum()
+        max_move_cost = -torch.clamp_((control_points[1:]-control_points[:-1]).pow(2).sum(dim=2)-max_speed**2, min=0).sum()
         return max_move_cost.data.numpy()
     def grad_con_max_move(p):
         if all(p == latest_p_max_move):
-            var_p_max_move.grad = None
-            max_move_cost.backward()
-            if var_p_max_move.grad is None:
-                return np.zeros(len(p), dtype=p.dtype)
-            return var_p_max_move.grad[1:-1].numpy().reshape(-1)
+            pass
         else:
-            raise ValueError('p is not the same as the lastest passed p')
+            con_max_move(p)
+            # print(ValueError('p is not the same as the lastest passed p'))
+        var_p_max_move.grad = None
+        max_move_cost.backward()
+        if var_p_max_move.grad is None:
+            return np.zeros(len(p), dtype=p.dtype)
+        return var_p_max_move.grad[1:-1].numpy().reshape(-1)
 
     def con_collision_free(p):
         global cnt_check, collision_cost, var_p_collision, latest_p_collision
@@ -303,13 +307,15 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
         return collision_cost.data.numpy()
     def grad_con_collision_free(p):
         if all(p == latest_p_collision):
-            var_p_collision.grad = None
-            collision_cost.backward()
-            if var_p_collision.grad is None:
-                return np.zeros(len(p), dtype=p.dtype)
-            return var_p_collision.grad[1:-1].numpy().reshape(-1)
+            pass
         else:
-            raise ValueError('p is not the same as the lastest passed p')
+            con_collision_free(p)
+            # print(ValueError('p is not the same as the lastest passed p'))
+        var_p_collision.grad = None
+        collision_cost.backward()
+        if var_p_collision.grad is None:
+            return np.zeros(len(p), dtype=p.dtype)
+        return var_p_collision.grad[1:-1].numpy().reshape(-1)
 
     def con_joint_limit(p):
         global joint_limit_cost, var_p_limit, latest_p_limit
@@ -320,13 +326,16 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
         return joint_limit_cost.data.numpy()
     def grad_con_joint_limit(p):
         if all(p == latest_p_limit):
-            var_p_collision.grad = None
-            joint_limit_cost.backward()
-            if var_p_collision.grad is None:
-                return np.zeros(len(p), dtype=p.dtype)
-            return var_p_collision.grad[1:-1].numpy().reshape(-1)
+            pass
         else:
-            raise ValueError('p is not the same as the lastest passed p')
+            con_joint_limit(p)
+            # print(ValueError('p is not the same as the lastest passed p'))
+            # raise ValueError('p is not the same as the lastest passed p')
+        var_p_collision.grad = None
+        joint_limit_cost.backward()
+        if var_p_collision.grad is None:
+            return np.zeros(len(p), dtype=p.dtype)
+        return var_p_collision.grad[1:-1].numpy().reshape(-1)
 
     def cost(p):
         global obj, var_p_cost, latest_p_cost
@@ -337,17 +346,20 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
         return obj.data.numpy()
     def grad_cost(p):
         if np.allclose(p, latest_p_cost):
-            var_p_cost.grad = None
-            obj.backward()
-            if var_p_cost.grad is None:
-                return np.zeros(len(p), dtype=p.dtype)
-            return var_p_cost.grad[1:-1].numpy().reshape(-1)
+            pass
         else:
-            print(p, latest_p_cost, np.linalg.norm(p-latest_p_cost))
-            raise ValueError('p is not the same as the lastest passed p')
+            cost(p)
+            # print(p, latest_p_cost, np.linalg.norm(p-latest_p_cost))
+            # print(ValueError('p is not the same as the lastest passed p'))
+        var_p_cost.grad = None
+        obj.backward()
+        if var_p_cost.grad is None:
+            return np.zeros(len(p), dtype=p.dtype)
+        return var_p_cost.grad[1:-1].numpy().reshape(-1)
 
     start_t = time()
     success = False
+    res = None
     for trial_time in trange(NUM_RE_TRIALS):
         if trial_time == 0:
             if 'init_solution' in options:
@@ -361,17 +373,19 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
             init_path = init_path * (robot.limits[:, 1]-robot.limits[:, 0]) + robot.limits[:, 0]
         init_path[0] = start_cfg
         init_path[-1] = target_cfg
-        res = minimize(cost, init_path[1:-1].reshape(-1).numpy(), jac=grad_cost,
+        tmp_res = minimize(cost, init_path[1:-1].reshape(-1).numpy(), jac=grad_cost,
             method='slsqp',
             constraints=[
                 {'fun': con_max_move, 'type': 'ineq', 'jac': grad_con_max_move},
                 {'fun': con_collision_free, 'type': 'ineq', 'jac': grad_con_collision_free},
                 {'fun': con_joint_limit, 'type': 'ineq', 'jac': grad_con_joint_limit}
             ],
-            options={'maxiter': MAXITER, 'disp': False})
-        if res.success:
+            options={'maxiter': MAXITER, 'disp': True, 'verbose': 3})
+        if tmp_res.success:
             success = True
             break
+        elif res is None or tmp_res.fun < res.fun:
+            res = tmp_res
     end_t = time()
     res.x = res.x.reshape([-1, robot.dof])
     res.x = pre_process(res.x)
@@ -542,12 +556,13 @@ def single_plot(robot, path, fig, cfg_path_plots=None, path_history=None, save_d
 
 def escape(robot, dist_est, start_cfg):
     N_WAYPOINTS = 200
-    safety_margin = -1.0
-    lr = 1
+    safety_margin = -0.3 # -30 for centimeter,  -0.3 for meter
+    lr = 0.05
     path_history = []
     init_path = start_cfg
     p = init_path.requires_grad_(True)
-    opt = torch.optim.Adam([p], lr=lr)
+    opt = torch.optim.Adam([p], lr=lr) # Adam is bad for rot and trans with huge unit range difference
+    # opt = torch.optim.SGD([p], lr=lr)
 
     for step in range(N_WAYPOINTS):
         if step % 1 == 0:
@@ -560,6 +575,7 @@ def escape(robot, dist_est, start_cfg):
         # p.grad[3:] = 0.0
         opt.step()
         print('Collision score: ', collision_score.data.item()+safety_margin)
+        print(p.grad.data)
         p.data[3:] = utils.wrap2pi(p.data[3:])
         if collision_score <= 1e-4:
             break
@@ -567,23 +583,29 @@ def escape(robot, dist_est, start_cfg):
 
 # Commented out lines include convenient code for debugging purposes
 def main():
-    env_name = 'binary_home'
+    env_name = 'binary_home_smalldesk_meter'
 
     dataset = torch.load('data/se3_{}.pt'.format(env_name))
     cfgs = dataset['data'].double()
     labels = dataset['label'].double()
-    dists = dataset['dist'].double() / 100
+    dists = dataset['dist'].double()
     # obstacles = dataset['obs']
     obstacle_paths = dataset['obs']
     # obstacles = [obs+(i, ) for i, obs in enumerate(obstacles)]
     print(obstacle_paths)
     robot = dataset['robot'](*dataset['rparam'])
     robot.keypoints = robot.keypoints.double()
-    train_num = 3000
+    robot.limits /= 1.3
+    train_num = 7000 #int(len(cfgs) * 0.9)
     fkine = robot.fkine
-    checker = DiffCo(obstacle_paths, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(0.0001)), beta=1.0)
+    Epsilon = 1 #0.01
+    checker = DiffCoBeta(obstacle_paths, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1,\
+        rbf_kernel=kernel.Polyharmonic(3, Epsilon))
+    checker.train(cfgs[:train_num], dists[:train_num], fkine=fkine, max_iteration=train_num, n_left_out_points=3000, keep_all=True)
+    # checker = DiffCo(obstacle_paths, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(100)), beta=1.0)
+    # checker = DiffCo(obstacle_paths, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(0.0001)), beta=1.0) # for centimeter environment
     # checker = MultiDiffCo(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
-    checker.train(cfgs[:train_num], labels[:train_num], max_iteration=len(cfgs[:train_num]), distance=dists[:train_num])
+    # checker.train(cfgs[:train_num], labels[:train_num], max_iteration=len(cfgs[:train_num]), distance=dists[:train_num])
     # import pickle
     # with open('results/checker_se3_{}.p'.format(env_name), 'wb') as f:
     #     pickle.dump(checker, f)
@@ -593,20 +615,25 @@ def main():
     #     checker = pickle.load(f)
     #     print('checker loaded: {}'.format(f.name))
 
-    fitting_target = 'dist' # {label, dist, hypo}
-    Epsilon = 1 #0.01
-    checker.fit_poly(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine)#, reg=0.09) # epsilon=Epsilon,
+    fitting_target = 'label' # {label, dist, hypo}
+    # checker.fit_poly(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine)#, reg=0.09) # epsilon=Epsilon,
     dist_est = checker.rbf_score
+    # checker.fit_full_poly(epsilon=Epsilon, k=1, target=fitting_target, fkine=fkine) #, lmbd=10)
+    # dist_est = checker.poly_score
     min_score = dist_est(cfgs[train_num:]).min()
+    safety_bias = -0.3 #-1.1 for diffco with label #-0.3 for diffcobeta with distance
     print('MIN_SCORE = {:.6f}'.format(min_score))
 
     # Check DiffCo test ACC
-    test_preds = (checker.rbf_score(cfgs[train_num:]).view(-1) > 0) * 2 - 1
+    test_preds = (dist_est(cfgs[train_num:]).view(-1)-safety_bias > 0) * 2 - 1
     test_acc = torch.sum(test_preds == labels[train_num:], dtype=torch.float32)/len(test_preds.view(-1))
     test_tpr = torch.sum(test_preds[labels[train_num:]==1] == 1, dtype=torch.float32) / len(test_preds[labels[train_num:]==1])
     test_tnr = torch.sum(test_preds[labels[train_num:]==-1] == -1, dtype=torch.float32) / len(test_preds[labels[train_num:]==-1])
     print('Test acc: {}, TPR {}, TNR {}'.format(test_acc, test_tpr, test_tnr))
-    assert(test_acc > 0.8)
+    # assert(test_acc > 0.8)
+    from matplotlib import pyplot as plt
+    plt.scatter(dists[train_num:].view(-1), dist_est(cfgs[train_num:]).view(-1))
+    plt.show()
 
     # return # DEBUGGING
 
@@ -618,7 +645,7 @@ def main():
 
     
 
-    # Begin optimization
+    # Pick a pair of collision-free configurations
     # torch.manual_seed(1213)
     # free_cfgs = cfgs[labels == -1]
     # indices = torch.randint(0, len(free_cfgs), (2, ))
@@ -627,27 +654,26 @@ def main():
     # start_cfg = free_cfgs[indices[0]] # torch.zeros(robot.dof, dtype=torch.float32) # 
     # target_cfg = free_cfgs[indices[1]] # torch.zeros(robot.dof, dtype=torch.float32) # 
 
-    # collided_cfgs = cfgs[labels == 1]
+    # Pick one in-collision configuration
+    # torch.manual_seed(1237)
+    # collided_cfgs = cfgs[dists > dists.max()/2] # cfgs[labels == 1]
     # indice = torch.randint(0, len(collided_cfgs), (1,))[0]
-    # start_cfg = collided_cfgs[indice] #
-    # start_cfg[3:] = 0
-    # start_cfg[5] = np.pi/6
-    # start_cfg[3] = np.pi/5
+    # start_cfg = collided_cfgs[indice]
     # print("Start from: ", start_cfg)
 
     # use star and goals from OMPL app
-    # ompl_start = list(map(float, '18.0 -110.0 67.19 0.0 0.0 0.0 1.0'.split(' ')))
-    # start_cfg_quat = torch.FloatTensor(ompl_start)
-    # start_cfg = torch.zeros(6)
-    # start_cfg[:3] = start_cfg_quat[:3]
-    # start_cfg[3:] = torch.from_numpy(Rotation.from_quat(start_cfg_quat[3:]).as_euler('zyx').astype(np.float32))
-    # ompl_target = list(map(float, '-142.0 -110.0 68.19 0.0 0.0 0.0 1.0'.split(' ')))
-    # target_cfg_quat = torch.FloatTensor(ompl_target)
-    # target_cfg = torch.zeros(6)
-    # target_cfg[:3] = target_cfg_quat[:3]
-    # target_cfg[3:] = torch.from_numpy(Rotation.from_quat(target_cfg_quat[3:]).as_euler('zyx').astype(np.float32))
+    ompl_start = list(map(float, '18.0 -110.0 67.19 0.0 0.0 0.0 1.0'.split(' ')))
+    start_cfg_quat = torch.FloatTensor(ompl_start)
+    start_cfg = torch.zeros(6)
+    start_cfg[:3] = start_cfg_quat[:3] /100*2
+    start_cfg[3:] = torch.from_numpy(Rotation.from_quat(start_cfg_quat[3:]).as_euler('xyz').astype(np.float32))
+    ompl_target = list(map(float, '-142.0 -110.0 68.19 0.0 0.0 0.0 1.0'.split(' ')))
+    target_cfg_quat = torch.FloatTensor(ompl_target)
+    target_cfg = torch.zeros(6)
+    target_cfg[:3] = target_cfg_quat[:3] /100*2
+    target_cfg[3:] = torch.from_numpy(Rotation.from_quat(target_cfg_quat[3:]).as_euler('xyz').astype(np.float32))
 
-    ## This is for doing traj optimization
+    # This is for doing traj optimization
     # p, path_history, num_trial, num_step = traj_optimize(
     #     robot, dist_est, start_cfg, target_cfg, history=True)
     # with open('results/path_se3_{}.json'.format(env_name), 'w') as f:
@@ -661,54 +687,73 @@ def main():
     #         f, indent=1)
     #     print('Plan recorded in {}'.format(f.name))
 
-    options = {
-        'N_WAYPOINTS': 20,
-        'NUM_RE_TRIALS': 1,
-        'MAXITER': 2000,
-        'safety_margin': -0.5,# max(1/5*min_score, -1),
-        'max_speed': 80,
-        'seed': 12345,
-        'history': False
-    }
-    init_path = []
-    with open('results/path.txt', 'r') as f:
-        for line in f:
-            init_path.append([float(x) for x in line.strip().split(' ')])
-    init_path_np = np.array(init_path)
-    init_path = np.zeros((len(init_path_np), 6))
-    init_path[:, :3] = init_path_np[:, :3]
-    init_path[:, 3:] = Rotation.from_quat(init_path_np[:, 3:]).as_euler('zyx')
-    init_path = torch.from_numpy(init_path).double()
-    options['init_solution'] = init_path
-    options['N_WAYPOINTS'] = len(init_path)
-    start_cfg, target_cfg = init_path[[0, -1]]
-    # rec = givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options=options)
-    rec = adam_traj_optimize(robot, dist_est, start_cfg, target_cfg, options=options)
-    p = torch.FloatTensor(rec['solution'])
+    # this is for doing traj opt using OMPL solution as initialization. You can also use SLSQP to optimize here
+    # init_path = []
+    # with open('results/path.txt', 'r') as f:
+    #     for line in f:
+    #         init_path.append([float(x) for x in line.strip().split(' ')])
+    # init_path_np = np.array(init_path)
+    # init_path = np.zeros((len(init_path_np), 6))
+    # init_path[:, :3] = init_path_np[:, :3] /100 *2
+    # init_path[:, 3:] = Rotation.from_quat(init_path_np[:, 3:]).as_euler('xyz')
+    # init_path = torch.from_numpy(init_path).double()
+    # start_cfg, target_cfg = init_path[[0, -1]]
+
     mesh = trimesh.load(obstacle_paths, force='mesh')
-    transformation_for_home_environment = np.array([
-        [1, 0, 0, 0],
-        [0, 0, 1, 0],
-        [0, -1, 0, 0],
-        [0, 0, 0, 1]
-    ])
+    transformation_for_home_environment = robot.transform * 2 #np.array([
+    #     [1, 0, 0, 0],
+    #     [0, 0, 1, 0],
+    #     [0, -1, 0, 0],
+    #     [0, 0, 0, 1]
+    # ]) /100
+    # transformation_for_home_environment = np.eye(4)
     mesh.apply_transform(transformation_for_home_environment)
+    mesh.visual.vertex_colors = trimesh.visual.interpolate(mesh.vertices[:, 1], color_map='viridis')
     bvh_mesh = trimesh.collision.mesh_to_BVH(mesh)
     fcl_obs = [FCLObstacle('mesh', [0, 0, 0], geom=bvh_mesh)]
     fcl_collision_obj = [fobs.cobj for fobs in fcl_obs]
     obs_managers = [fcl.DynamicAABBTreeCollisionManager()]
     obs_managers[0].registerObjects(fcl_collision_obj)
-    robot_links = robot.update_polygons(p[0])
+    robot_links = robot.update_polygons(start_cfg)
     robot_manager = fcl.DynamicAABBTreeCollisionManager()
     robot_manager.registerObjects(robot_links)
     robot_manager.setup()
     obs_managers[0].setup()
     fcl_checker = FCLChecker(obstacle_paths, robot, robot_manager, obs_managers)
-    fcl_preds = fcl_checker.predict(p, distance=False).view(-1)
-    print('In collision:', (fcl_preds==1).sum())
-    print('Collision free:', (fcl_preds==-1).sum())
+    # # fcl_preds, fcl_dist = fcl_checker.predict(init_path, distance=True)
+    # # print('FCL checking initial solution: {}'.format('All valid!' if torch.all(fcl_preds == -1) else \
+    # #     '{} invalid waypoints.'.format(torch.sum(fcl_preds == 1).item())))
+    # # fcl_preds, fcl_dist = fcl_checker.predict(cfgs[train_num:], distance=True)
+    # # diffco_preds = dist_est(cfgs[train_num:]) # > 0)* 2 - 1
+    # # diffco_preds = dist_est(init_path)# > 0)* 2 - 1
+    # # print('{}/{} incorrect predictions.'.format((diffco_preds != fcl_preds).sum(), len(diffco_preds)))
+    # # print('DiffCo checking initial solution: {}'.format('All valid!' if torch.all(diffco_preds == -1) else \
+    # #     '{} invalid waypoints.'.format(torch.sum(diffco_preds == 1).item())))
+    # # print(diffco_preds)
+    # # from matplotlib import pyplot as plt
+    # # # plt.plot(range(len(diffco_preds)), diffco_preds, label="diffco")
+    # # # plt.plot(range(len(diffco_preds)), fcl_dist, label="fcl")
+    # # plt.scatter(fcl_dist, diffco_preds)
+    # # plt.axis('equal')
+    # # plt.legend()
+    # # plt.show()
+    # # utils.view_se3_path(robot, mesh, init_path)
+    # # return
     
-
+    options = {
+        'N_WAYPOINTS': 40,
+        'NUM_RE_TRIALS': 3,
+        'MAXITER': 500,
+        'safety_margin': safety_bias, # max(1/5*min_score, -1),
+        'max_speed': 0.5,
+        'seed': 123456,
+        'history': False,
+    }
+    # options['init_solution'] = init_path
+    # options['N_WAYPOINTS'] = len(init_path)
+    # rec = givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options=options)
+    rec = adam_traj_optimize(robot, dist_est, start_cfg, target_cfg, options=options)
+    p = torch.FloatTensor(rec['solution'])
     print('Succeeded!' if rec['success'] else 'Not successful')
     with open('results/path_se3_{}.json'.format(env_name), 'w') as f:
         json.dump(
@@ -717,7 +762,11 @@ def main():
             },
             f, indent=1)
         print('Plan recorded in {}'.format(f.name))
-    save_ompl_path('results/ompl_se3_{}.txt'.format(env_name), p)
+    save_ompl_path('results/ompl_se3_{}.txt'.format(env_name), p*torch.FloatTensor([100, 100, 100, 1, 1, 1]))
+    fcl_preds = fcl_checker.predict(p, distance=False).view(-1)
+    print('In collision:', (fcl_preds==1).sum())
+    print('Collision free:', (fcl_preds==-1).sum())
+    utils.view_se3_path(robot, mesh, p)
 
     ## This for doing the escaping-from-collision experiment
     # p = escape(robot, dist_est, start_cfg.double())
@@ -729,6 +778,10 @@ def main():
     #     p = torch.FloatTensor(path_dict['path'])
     #     print('Esc plan loaded from {}'.format(f.name))
     # save_ompl_path('results/ompl_escape_se3_{}.txt'.format(env_name), p)
+    # fcl_preds = fcl_checker.predict(p, distance=False).view(-1)
+    # print('In collision:', (fcl_preds==1).sum())
+    # print('Collision free:', (fcl_preds==-1).sum())
+    # utils.view_se3_path(robot, mesh, p)
 
     ## This is for loading previously computed trajectory
     # with open('results/path_se3_{}.json'.format(env_name), 'r') as f:
@@ -755,10 +808,24 @@ def main():
     # plt.tight_layout()
     # plt.savefig('figs/opening_contourline.png', dpi=500, bbox_inches='tight')
     
-    
+def check_configuration_convention():
+    p = torch.zeros((10, 6))
+    p[:, :3] = torch.FloatTensor([18.0, -130.0, 67.19000244140625])
+    deg2rad = np.pi/180.
+    p[0, 3] = 30 * deg2rad
+    p[0, 4] = 45 * deg2rad
+    p[0, 5] = 70 * deg2rad
+    p[-1, 3] = 60 * deg2rad
+    p[-1, 4] = 80 * deg2rad
+    p[-1, 5] = 120 * deg2rad
+    p[:, 3:] = torch.from_numpy(np.linspace(p[0, 3:], p[-1, 3:], len(p)))
+
+    print(p[:, 3:] / deg2rad)
+    save_ompl_path('results/check_convention.txt', p)
 
 
 
 
 if __name__ == "__main__":
     main()
+    # check_configuration_convention()

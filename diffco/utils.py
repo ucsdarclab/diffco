@@ -13,7 +13,7 @@ def rotz(phi):
     return res
 
 def euler2mat(phi):
-    # assumes roll pitch yaw (x, y, z). yaw is applied first and roll is last
+    # assumes roll pitch yaw (x, y, z).
     phi = phi.reshape((-1, 3))
     s = torch.sin(phi)
     c = torch.cos(phi)
@@ -35,7 +35,7 @@ def euler2mat(phi):
         s[:, 2], c[:, 2], zeros,
         zeros, zeros, ones, 
     ], dim=1).reshape((len(phi), 3, 3))
-    return rx@ry@rz
+    return rz@ry@rx# rx@ry@rz
 
 def rot_2d(phi):
     res = torch.zeros((len(phi), 2, 2))
@@ -82,16 +82,35 @@ def open3d_save_image(geoms, path):
     vis.capture_screen_image(path)
     vis.destroy_window()
 
+def view_se3_path(robot, env_mesh, path):
+    import trimesh
+    rmeshes = []
+    for i in range(len(path)):# torch.nonzero(fcl_preds.view(-1) == 1):
+        r = euler2mat(path[i, 3:])[0].numpy()
+        t = path[i, :3]
+        tf = np.eye(4)
+        tf[:3, :3] = r
+        tf[:3, 3] = t
+        r_mesh = robot.mesh.copy()
+        r_mesh.apply_transform(tf)
+        r_mesh.visual.vertex_colors = trimesh.visual.interpolate(r_mesh.vertices[:, 2], color_map='viridis')
+        rmeshes.append(r_mesh)
+    rmeshes[0].visual.vertex_colors = np.ones((len(rmeshes[0].vertices), 3)) * [0, 1, 0]
+    rmeshes[-1].visual.vertex_colors = np.ones((len(rmeshes[-1].vertices), 3)) * [1, 1, 0]
+    sum(rmeshes, env_mesh).show()
+
 def save_ompl_path(filename, path):
-    # input x, y, z, roll, pitch, yaw ('zyx' convention euler angles)
+    # input x, y, z, roll, pitch, yaw ('xyz' extrinsic convention euler angles)
     # output x,y,z,q1,q2,q3,w (scalar-last quaternions)
     from scipy.spatial.transform import Rotation
-    path = path.data.numpy()
+    # path = path.data.numpy()
     p_numpy = np.zeros((len(path), 7))
     p_numpy[:, :3] = path[:, :3]
-    p_numpy[:, 3:] = Rotation.from_euler('zyx', path[:, 3:]).as_quat()
+    p_numpy[:, 3:] = Rotation.from_euler('xyz', path[:, 3:]).as_quat()
+    # p_numpy[:, 3:] = Rotation.from_matrix(euler2mat(path[:, 3:]).numpy()).as_quat()
     with open(filename, 'w') as f:
         f.writelines([' '.join(map(str, cfg))+'\n' for cfg in p_numpy.tolist()])
+        print('OMPL path saved in {}'.format(f.name))
 
 
 if __name__ == "__main__":

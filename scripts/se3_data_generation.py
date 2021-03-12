@@ -213,7 +213,8 @@ def generate_home(robot, obs_model_path, folder, label_type='binary', num_class=
 
     times = []
     st = time()
-    for i, cfg in enumerate(cfgs):
+    from tqdm import tqdm
+    for i, cfg in enumerate(tqdm(cfgs)):
         st1 = time()
         robot.update_polygons(cfg)
         robot_manager.update()
@@ -244,16 +245,74 @@ def generate_home(robot, obs_model_path, folder, label_type='binary', num_class=
 
     dataset = {
         'data': cfgs, 'label': labels, 'dist': dists, 'obs': obs_model_path, 
-        'robot': robot.__class__, 'rparam': [robot.body_path, robot.keypoints, robot.limits]
+        'robot': robot.__class__, 'rparam': [robot.body_path, robot.keypoints, robot.limits, robot.transform]
     }
     torch.save(dataset, os.path.join(
         folder, 'se3_{}_{}.pt'.format(label_type, env_id)))
 
+def check_convention():
+    transformation_for_home_environment = np.array([
+        [1, 0, 0, 0],
+        [0, 0, 1, 0],
+        [0, -1, 0, 0],
+        [0, 0, 0, 1]
+    ])
+    transform = transformation_for_home_environment
+    # type, offset, dimensions
+    robot = RigidBody('data/Home_robot.dae', transform=transformation_for_home_environment)
+    num_points = 30
+    obs_model_path = 'data/Home_env.dae'
 
-if __name__ == "__main__":
+    mesh = trimesh.load(obs_model_path, force='mesh')
+    if transform is not None:
+        mesh.apply_transform(transform)
+    bvh_mesh = trimesh.collision.mesh_to_BVH(mesh)
+    bounds = mesh.bounds
+    robot.limits[:3] = 1.3*torch.from_numpy(bounds.copy()).T # setting limits to room dimensions
+    fcl_obs = [FCLObstacle('mesh', [0, 0, 0], geom=bvh_mesh)]
+    fcl_collision_obj = [fobs.cobj for fobs in fcl_obs]
+
+    seed = 1917
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    cfgs = torch.rand((num_points, robot.dof), dtype=torch.float32)
+    cfgs[:, :3] = torch.from_numpy(np.linspace([0, 0, 0], [1, 1, 1], len(cfgs)))# ONLY for checking convention
+    cfgs[:, 3:] = torch.FloatTensor([0.3, 0.4, 0.5])
+    cfgs = cfgs * (robot.limits[:, 1]-robot.limits[:, 0]) + robot.limits[:, 0]
+    for cfg in cfgs:
+        r = utils.euler2mat(cfg[3:])[0].numpy()
+        t = cfg[:3]
+        tf = np.eye(4)
+        tf[:3, :3] = r
+        tf[:3, 3] = t
+        r_mesh = robot.mesh.copy()
+        r_mesh.apply_transform(tf)
+        # (r_mesh+mesh).show()
+        del r_mesh
+
+    
+
+    obs_managers = [fcl.DynamicAABBTreeCollisionManager()]
+    obs_managers[0].registerObjects(fcl_collision_obj)
+    
+    robot_links = robot.update_polygons(cfgs[0])
+    robot_manager = fcl.DynamicAABBTreeCollisionManager()
+    robot_manager.registerObjects(robot_links)
+    robot_manager.setup()
+    for mng in obs_managers:
+        mng.setup()
+
+    from diffco import FCLChecker
+    fcl_checker = FCLChecker(obs_model_path, robot, robot_manager, obs_managers)
+    labels = fcl_checker.predict(cfgs)
+    print(labels)
+    from diffco.utils import save_ompl_path
+    save_ompl_path('results/se3_generation_check_convention.txt', cfgs)
+
+def main():
+    # Main:
     batch_name = 'exp1'
 
-    label_type = 'binary' #[instance, class, binary]
     seed = 1917
 
     transformation_for_home_environment = np.array([
@@ -261,9 +320,9 @@ if __name__ == "__main__":
         [0, 0, 1, 0],
         [0, -1, 0, 0],
         [0, 0, 0, 1]
-    ])
+    ]) /100 # convert to meter
     # type, offset, dimensions
-    robot = RigidBody('data/Home_robot.dae', transform=transformation_for_home_environment)
+    robot = RigidBody('data/Home_robot.dae', transform=transformation_for_home_environment, center=True)
 
     folder_name = os.path.join('data', 'se3_{}'.format(batch_name))
     if os.path.isdir(folder_name):
@@ -279,5 +338,10 @@ if __name__ == "__main__":
     np.random.seed(seed)
     torch.random.manual_seed(seed)
 
-    generate_home(robot, 'data/Home_env.dae', folder_name, num_points=8000, env_id='home', 
+    # Change here to change names of generated environment
+    generate_home(robot, 'data/Home_env.dae', folder_name, num_points=30000, env_id='home_many', 
         transform=transformation_for_home_environment)
+
+if __name__ == "__main__":
+    main()
+    # check_convention()

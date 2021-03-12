@@ -102,14 +102,20 @@ class RigidPlanarBody(Model):
         return self.collision_objs
 
 class RigidBody(Model):
-    def __init__(self, body_path, keypoints=None, limits=None, transform=None):
+    def __init__(self, body_path, keypoints=None, limits=None, transform=None, center=True):
         # Setting keypoints to none means using the corner points as keypoints
+        # Update: if providing
         self.body_path = body_path
         self.collision_objs = []
+        self.transform = transform
         if '.dae' in body_path:
             self.mesh = trimesh.load(body_path, force='mesh')
             if transform is not None:
                 self.mesh.apply_transform(transform)
+            if center: # OMPL center a robot object before planning
+                centering_tf = np.eye(4)#
+                centering_tf[:3, 3] = -self.mesh.vertices.mean(0)
+                self.mesh.apply_transform(centering_tf)
             self.collision_objs.append(fcl.CollisionObject(trimesh.collision.mesh_to_BVH(self.mesh)))
             # self.mesh.show()
             # open3d_mesh = self.mesh.as_open3d
@@ -124,7 +130,9 @@ class RigidBody(Model):
         self.limits = torch.FloatTensor(limits) if limits != None else torch.FloatTensor(
             [[-10, 10], [-10, 10], [-10, 10], [-pi, pi], [-pi, pi], [-pi, pi]])
         if keypoints is None:
-            self.keypoints = torch.from_numpy(trimesh.bounds.corners(self.mesh.bounds).astype(np.float32)).T # 3*M
+            corners = torch.from_numpy(trimesh.bounds.corners(self.mesh.bounds).astype(np.float32)).T # 3*M
+            self.keypoints = corners / corners.norm(dim=0).max()
+            assert self.keypoints.shape == corners.shape
         else:
             self.keypoints = torch.FloatTensor(keypoints)
     
@@ -296,7 +304,13 @@ def main():
     # plt.show()
 
 def test_rigid_body():
-    robot = RigidBody('data/Home_env.dae', [[0, 0, 0]])
+    transformation_for_home_environment = np.array([
+        [1, 0, 0, 0],
+        [0, 0, 1, 0],
+        [0, -1, 0, 0],
+        [0, 0, 0, 1]
+    ])
+    robot = RigidBody('data/Home_robot.dae', [[0, 0, 0]], transform=transformation_for_home_environment)
 
 if __name__ == "__main__":
     # main() # the main test

@@ -12,7 +12,7 @@ from .DiffCo import CollisionChecker, DiffCo
 
 
 class DiffCoBeta(DiffCo):
-    def __init__(self, obstacles, kernel_func='rq', rbf_kernel=None, gamma=1, beta=1, gt_checker=None):
+    def __init__(self, obstacles, kernel_func='rq', rbf_kernel=None, gamma=1, beta=1, k=1, epsilon=1, gt_checker=None):
         super().__init__(obstacles, kernel_func, gamma, beta, gt_checker)
         # self.gt_checker = gt_checker if gt_checker is not None else CollisionChecker(self.obstacles)
         # self.kernel_func = kernel.RQKernel(gamma) if kernel_func=='rq' else kernel_func
@@ -51,61 +51,61 @@ class DiffCoBeta(DiffCo):
             X = fkine(X).reshape([len(X), -1])
             self.fkine = fkine
             self.support_fkine = X
-        self.kernel_matrix = self.rbf_kernel(X, X) # not considering inter-class
-        # assert (torch.inverse(self.kernel_matrix.transpose(1, 0))@self.kernel_matrix.transpose(1, 0)-torch.eye(len(X))).abs().max() < 1e-3, \
-            # (torch.inverse(self.kernel_matrix.transpose(1, 0))@self.kernel_matrix.transpose(1, 0)-torch.eye(len(X))).abs().max()
+        self.kernel_matrix = self.rbf_kernel(X, X)+0.1*torch.eye(len(X)) # not considering inter-class
+        assert (torch.inverse(self.kernel_matrix.transpose(1, 0))@self.kernel_matrix.transpose(1, 0)-torch.eye(len(X))).abs().max() < 1e-3, \
+            (torch.inverse(self.kernel_matrix.transpose(1, 0))@self.kernel_matrix.transpose(1, 0)-torch.eye(len(X))).abs().max()
 
         # self.gains = self.kernel_matrix@self.distance/torch.sqrt(self.distance.reshape(1, -1)@self.kernel_matrix.transpose(1, 0)@self.kernel_matrix@self.distance.reshape(-1, 1))
         # self.gains = self.gains.reshape(-1)
 
-        # self.gains = torch.solve(self.distance[:, None], self.kernel_matrix).solution.reshape(-1)
-        # self.hypothesis = self.kernel_matrix @ self.gains
+        self.gains = torch.solve(self.distance[:, None], self.kernel_matrix).solution.reshape(-1)
+        self.hypothesis = self.kernel_matrix @ self.gains
 
         # self.gains = self.gains.requires_grad_(True)
         # opt = torch.optim.Adam([self.gains], lr=0.001)
-        for it in tqdm(range(max_iteration//100)):
-            lda = 0.01 # 0.00001
-            gtol = 0.05
-            loss = (self.distance-self.kernel_matrix@self.gains).pow(2).mean() + lda*self.gains.pow(2).sum()*2
-            if it % 100 == 0:
-                print(it, 'Loss = ', loss.data.item())
-            # if loss.data.item() < dtol or (self.gains.abs() < gtol).sum() == 0:
-            #     break
+        # for it in tqdm(range(max_iteration//100)):
+        #     lda = 0.01 # 0.00001
+        #     gtol = 0.05
+        #     loss = (self.distance-self.kernel_matrix@self.gains).pow(2).mean() + lda*self.gains.pow(2).sum()*2
+        #     if it % 100 == 0:
+        #         print(it, 'Loss = ', loss.data.item())
+        #     # if loss.data.item() < dtol or (self.gains.abs() < gtol).sum() == 0:
+        #     #     break
             
-            # for _ in range(200):
-            #     loss = (self.distance-self.kernel_matrix@self.gains).pow(2).mean() + 1*self.gains.abs().sum()
-            #     opt.zero_grad()
-            #     loss.backward()
-            #     # opt.param_groupds
-            #     opt.step()
+        #     # for _ in range(200):
+        #     #     loss = (self.distance-self.kernel_matrix@self.gains).pow(2).mean() + 1*self.gains.abs().sum()
+        #     #     opt.zero_grad()
+        #     #     loss.backward()
+        #     #     # opt.param_groupds
+        #     #     opt.step()
             
-            # sq = self.kernel_matrix.transpose(1, 0) @self.kernel_matrix \
-            #         + lda*torch.eye(len(self.kernel_matrix))
-            # sqinv = torch.inverse(sq)
-            # assert (sqinv@sq - torch.eye(len(sq))).abs().max() < 1e-4, (sqinv@sq - torch.eye(len(sq))).abs().max()
-            # self.gains = sqinv @ self.kernel_matrix.transpose(1, 0) @ self.distance[:, None]
-            # self.gains = self.gains.view(-1)
-            # assert (self.kernel_matrix@self.gains - self.distance).abs().max() < 1e-3, (self.kernel_matrix@self.gains - self.distance).abs().max()
-            '''
-            self.gains = torch.solve( #@self.kernel_matrix
-                self.kernel_matrix.transpose(1, 0) @ self.distance[:, None], 
-                self.kernel_matrix.transpose(1, 0) @self.kernel_matrix\
-                    + lda*torch.eye(len(self.kernel_matrix))
-                ).solution.reshape(-1) #-0.05*torch.sign(self.gains[:, None])
+        #     # sq = self.kernel_matrix.transpose(1, 0) @self.kernel_matrix \
+        #     #         + lda*torch.eye(len(self.kernel_matrix))
+        #     # sqinv = torch.inverse(sq)
+        #     # assert (sqinv@sq - torch.eye(len(sq))).abs().max() < 1e-4, (sqinv@sq - torch.eye(len(sq))).abs().max()
+        #     # self.gains = sqinv @ self.kernel_matrix.transpose(1, 0) @ self.distance[:, None]
+        #     # self.gains = self.gains.view(-1)
+        #     # assert (self.kernel_matrix@self.gains - self.distance).abs().max() < 1e-3, (self.kernel_matrix@self.gains - self.distance).abs().max()
+        #     '''
+        #     self.gains = torch.solve( #@self.kernel_matrix
+        #         self.kernel_matrix.transpose(1, 0) @ self.distance[:, None], 
+        #         self.kernel_matrix.transpose(1, 0) @self.kernel_matrix\
+        #             + lda*torch.eye(len(self.kernel_matrix))
+        #         ).solution.reshape(-1) #-0.05*torch.sign(self.gains[:, None])
             
-            self.gains = self.gains.data
-            print('Small gains: ', (self.gains.abs() < gtol).sum())
-            self.gains[self.gains.abs() < gtol] = 0
-            self.support_points = self.support_points[self.gains != 0]
-            self.support_fkine = self.support_fkine[self.gains != 0]
-            self.hypothesis = self.hypothesis[self.gains != 0]
-            self.distance = self.distance[self.gains != 0]
-            self.kernel_matrix = self.kernel_matrix[self.gains != 0][:, self.gains != 0]
-            '''
+        #     self.gains = self.gains.data
+        #     print('Small gains: ', (self.gains.abs() < gtol).sum())
+        #     self.gains[self.gains.abs() < gtol] = 0
+        #     self.support_points = self.support_points[self.gains != 0]
+        #     self.support_fkine = self.support_fkine[self.gains != 0]
+        #     self.hypothesis = self.hypothesis[self.gains != 0]
+        #     self.distance = self.distance[self.gains != 0]
+        #     self.kernel_matrix = self.kernel_matrix[self.gains != 0][:, self.gains != 0]
+        #     '''
             
-            self.gains = torch.solve(self.distance[:, None], self.kernel_matrix).solution.reshape(-1)
-            # self.gains = self.gains.requires_grad_(True)
-            # opt = torch.optim.Adam([self.gains], lr=0.001)
+        #     self.gains = torch.solve(self.distance[:, None], self.kernel_matrix).solution.reshape(-1)
+        #     # self.gains = self.gains.requires_grad_(True)
+        #     # opt = torch.optim.Adam([self.gains], lr=0.001)
         self.rbf_nodes = self.gains
         self.hypothesis = self.rbf_score(self.support_points) # self.kernel_matrix@self.gains
 
@@ -148,8 +148,8 @@ class DiffCoBeta(DiffCo):
         self.distance = d.clone()
         num_init_points = len(X)
         self.gains = torch.zeros(num_init_points, dtype=X.dtype)
-        self.kernel_matrix = torch.zeros((num_init_points, num_init_points), dtype=X.dtype)
-        self.hypothesis = torch.zeros(num_init_points, dtype=X.dtype)
+        # self.kernel_matrix = torch.zeros((num_init_points, num_init_points), dtype=X.dtype)
+        # self.hypothesis = torch.zeros(num_init_points, dtype=X.dtype)
     
     
     def fit_poly(self, kernel_func=None, target='hypo', fkine=None): #epsilon=None, 
