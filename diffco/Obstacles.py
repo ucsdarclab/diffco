@@ -40,3 +40,25 @@ class FCLObstacle:
 
         self.cobj = fcl.CollisionObject(self.geom, fcl.Transform(pos_3d))
         self.category = category
+
+class Simple1DDynamicObstacle:
+    def __init__(self, size, position_func):
+        self.size = size
+        self.position_func = position_func
+
+    def is_collision(self, point, t, distance=True):
+        ''' point is the query point, p is the center of the obstacle
+            distance indicates whether to return collision distance
+        '''
+
+        p = self.position_func(t)
+        d = torch.abs(point-p) - self.size/2
+        in_collision = d > 0 # point >= p-self.size/2 and point <= p+self.size/2
+        # if in_collision:
+        #     d = torch.minimum(point - p + self.size/2, p + self.size/2 - point)
+        # else:
+        #     d = -torch.minimum(torch.abs(point-p+self.size/2), torch.abs(point - p - self.size/2))
+        if distance:
+            return in_collision, d
+        else:
+            return in_collision

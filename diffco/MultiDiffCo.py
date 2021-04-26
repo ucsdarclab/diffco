@@ -31,16 +31,17 @@ class MultiDiffCo(DiffCo):
             self.train_svm()
         
         non_zero_weight_cnt = torch.sum(self.gains != 0, axis=1)
-        self.support_points = self.support_points[non_zero_weight_cnt != 0]
-        self.kernel_matrix = self.kernel_matrix[non_zero_weight_cnt != 0]
-        self.kernel_matrix = self.kernel_matrix[:, non_zero_weight_cnt != 0]
-        self.hypothesis = self.hypothesis[non_zero_weight_cnt != 0]
-        self.y = self.y[non_zero_weight_cnt != 0]
-        if distance is not None:
-            self.distance = distance[non_zero_weight_cnt != 0]
-        else:
-            self.distance = None
-        self.gains = self.gains[non_zero_weight_cnt != 0]
+        self.filter_support_points_(non_zero_weight_cnt != 0)
+        # self.support_points = self.support_points[non_zero_weight_cnt != 0]
+        # self.kernel_matrix = self.kernel_matrix[non_zero_weight_cnt != 0]
+        # self.kernel_matrix = self.kernel_matrix[:, non_zero_weight_cnt != 0]
+        # self.hypothesis = self.hypothesis[non_zero_weight_cnt != 0]
+        # self.y = self.y[non_zero_weight_cnt != 0]
+        # if distance is not None:
+        #     self.distance = distance[non_zero_weight_cnt != 0]
+        # else:
+        #     self.distance = None
+        # self.gains = self.gains[non_zero_weight_cnt != 0]
 
         time_elapsed = time() - time_start
         print('{} training done. {:.4f} secs cost'.format(method, time_elapsed))
@@ -101,7 +102,7 @@ class MultiDiffCo(DiffCo):
             # self.kernel_matrix = kernel_matrix
         self.kernel_matrix = torch.zeros((num_init_points, num_init_points), dtype=X.dtype)
         # self.kernel_matrix = 1/(1+self.gamma/2*np.sum((K-K.transpose(1, 0, 2))**2, axis=2))**2
-        self.max_n_support = 200 # Not enforced, might be a TODO
+        # self.max_n_support = 200 # Not enforced, might be a TODO
     
     def predict(self, point):
         score = self.score(point)

@@ -1,5 +1,4 @@
 import sys
-# sys.path.append('/home/yuheng/DiffCo/')
 from diffco import DiffCo
 from diffco import kernel
 from matplotlib import pyplot as plt

@@ -48,13 +48,22 @@ class DiffCo(CollisionChecker):
             self.train_svm()
         
         if not keep_all:
-            self.support_points = self.support_points[self.gains != 0]
-            self.hypothesis = self.hypothesis[self.gains != 0]
-            self.y = self.y[self.gains != 0]
-            self.distance = self.distance[self.gains != 0] if self.distance is not None else None
-            self.gains = self.gains[self.gains != 0]
+            # self.support_points = self.support_points[self.gains != 0]
+            # self.hypothesis = self.hypothesis[self.gains != 0]
+            # self.y = self.y[self.gains != 0]
+            # self.distance = self.distance[self.gains != 0] if self.distance is not None else None
+            # self.gains = self.gains[self.gains != 0]
+            self.filter_support_points_(self.gains != 0)
         time_elapsed = time() - time_start
         print('{} training done. {:.4f} secs cost'.format(method, time_elapsed))
+    
+    def filter_support_points_(self, mask):
+        self.support_points = self.support_points[mask]
+        self.hypothesis = self.hypothesis[mask]
+        self.y = self.y[mask]
+        self.distance = self.distance[mask] if self.distance is not None else None
+        self.gains = self.gains[mask]
+        self.kernel_matrix = self.kernel_matrix[np.ix_(mask, mask)]
 
     def train_perceptron(self, X, y, max_iteration=1000):
         # self.y = torch.zeros(len(self.support_points))

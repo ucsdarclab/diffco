@@ -131,12 +131,34 @@ class FKKernel(KernelFunc):
         self.fkine = fkine
         self.rq_kernel = rq_kernel
     
-    def __call__(self, xs, x_primes):
+    def __call__(self, xs, x_primes=None, x_primes_controls=None):
         if xs.ndim == 1:
             xs = xs[np.newaxis, :]
         xs_controls = self.fkine(xs).reshape(len(xs), -1)
-        x_primes_controls = self.fkine(x_primes).reshape(len(x_primes), -1)
+        if x_primes_controls is None:
+            x_primes_controls = self.fkine(x_primes).reshape(len(x_primes), -1)
         return self.rq_kernel(xs_controls, x_primes_controls)
+
+class TemporalFKKernel(KernelFunc):
+    def __init__(self, fkine, rqkernel, t_rqkernel, alpha=0.5):
+        # k((x1, t1), (x2, t2)) = alpha * fk_kernel(x1, x2) + (1-alpha) * rq_kernel(x1, x2)
+        self.fkine = fkine
+        self.rqkernel = rqkernel
+        self.t_rqkernel = t_rqkernel
+        self.alpha = alpha
+    
+    def __call__(self, xs, x_primes):
+        '''
+        This assumes t is the last feature of each (extended) configuration
+        '''
+        if xs.ndim == 1:
+            xs = xs[None, :]
+        xs, ts = xs[:, :-1], xs[:, -1:]
+        x_primes, t_primes = x_primes[:, :-1], x_primes[:, -1:]
+        xs_controls = self.fkine(xs).reshape(len(xs), -1)
+        x_primes_controls = self.fkine(x_primes).reshape(len(x_primes), -1)
+        return self.alpha * self.rqkernel(xs_controls, x_primes_controls) \
+            + (1-self.alpha) * self.t_rqkernel(ts, t_primes)
 
 class LineKernel(KernelFunc):
     def __init__(self, point_kernel):

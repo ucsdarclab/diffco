@@ -42,3 +42,25 @@ class FCLChecker(CollisionChecker):
     
     def score(self, X):
         return self.predict(X, distance=True)[1]
+
+class Simple1DDynamicChecker(CollisionChecker):
+    def __init__(self, obstacles):
+        super().__init__(obstacles)
+    
+    def predict(self, X, ts, distance=True):
+        # labels = torch.FloatTensor(len(X))
+        # dists = torch.FloatTensor(len(X)) if distance else None
+        res = [obs.is_collision(X, ts, distance=distance) for obs in self.obstacles]
+        labels, dists = tuple(zip(*res))
+        labels = (torch.vstack(labels).sum(dim=1) > 0) * 2 - 1
+        if not distance:
+            return labels
+        dists = torch.max(torch.vstack(dists), dim=1)
+        # for i, (cfg, t) in enumerate(zip(X, ts)):
+        #     res = [obs.is_collision(cfg[0], t) for obs in self.obstacles]
+        #     in_collision = any([r[0] for r in res])
+        #     labels[i] = 1 if in_collision else -1
+        #     if distance:
+        #         dists[i] = max([r[1] for r in res])
+        return labels, dists
+

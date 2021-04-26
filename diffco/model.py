@@ -217,6 +217,19 @@ class BaxterFK(Model):
         self.fkine_backup = torch.stack([t[:, :3, 3] for t in cum_tfs], dim=1)
         return self.fkine_backup
 
+class PointRobot1D(Model):
+    def __init__(self, limits):
+        self.limits = torch.FloatTensor(limits)
+        self.dof = 1
+        pass
+
+    def fkine(self, q):
+        '''
+        Assume q is from [0, 1]
+        '''
+        q = torch.reshape(q, (-1, self.dof))
+        return q * (self.limits[:, 1] - self.limits[:, 0]) + self.limits[:, 0]
+
 def main():
     lw_data = 0.3
     robot = RevolutePlanarRobot(1, dof=7, link_width=lw_data)
