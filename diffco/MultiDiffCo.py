@@ -20,11 +20,12 @@ class MultiDiffCo(DiffCo):
     def __init__(self, objects, kernel_func='rq', gamma=1, beta=1, gt_checker=None):
         super().__init__(objects, kernel_func, gamma, beta, gt_checker)
     
-    def train(self, X, y, max_iteration=1000, gains=None, hypothesis=None, method='original', distance=None): #kernel_matrix=None
+    def train(self, X, y, max_iteration=1000, gains=None, hypothesis=None, method='original', distance=None, kernel_matrix=None):
         self.train_method = method
+        self.distance = distance
         time_start = time()
         if method == 'original':
-            self.train_perceptron(X, y, max_iteration, gains, hypothesis) #, kernel_matrix
+            self.train_perceptron(X, y, max_iteration, gains, hypothesis, kernel_matrix)
         elif method == 'sgd':
             self.train_sgd(max_iteration)
         elif method == 'svm':
@@ -46,8 +47,8 @@ class MultiDiffCo(DiffCo):
         time_elapsed = time() - time_start
         print('{} training done. {:.4f} secs cost'.format(method, time_elapsed))
 
-    def train_perceptron(self, X, y, max_iteration=1000, gains=None, hypothesis=None): #, kernel_matrix=None):
-        self.initialize(X, y, gains=gains, hypothesis=hypothesis)# , kernel_matrix=kernel_matrix)
+    def train_perceptron(self, X, y, max_iteration=1000, gains=None, hypothesis=None, kernel_matrix=None):
+        self.initialize(X, y, gains=gains, hypothesis=hypothesis, kernel_matrix=kernel_matrix)
         complete = torch.zeros(self.num_class, dtype=torch.bool)
 
         print('MultiDiffCo training...')
@@ -79,6 +80,7 @@ class MultiDiffCo(DiffCo):
                 break
         
         print('Ended at iteration {}'.format(it))
+        print('ACC: {}'.format(torch.sum((self.hypothesis > 0) == (self.y > 0)) / (np.prod(self.y.shape))))
 
     def train_sgd(self, max_iteration=1000):
         raise NotImplementedError
@@ -86,21 +88,21 @@ class MultiDiffCo(DiffCo):
     def train_svm(self):
         raise NotImplementedError
 
-    def initialize(self, X, y, gains=None, hypothesis=None): #, kernel_matrix=None
+    def initialize(self, X, y, gains=None, hypothesis=None, kernel_matrix=None): 
         self.support_points = X.clone()
         self.y = y.clone()
         num_init_points = len(X)
         self.num_class = y.shape[1]
-        if gains is None and hypothesis is None:# and kernel_matrix is None:
+        if gains is None and hypothesis is None and kernel_matrix is None:
             self.gains = torch.zeros((num_init_points, self.num_class), dtype=X.dtype)
             self.hypothesis = torch.zeros((num_init_points, self.num_class), dtype=X.dtype)
-        elif gains is None or hypothesis is None: # or kernel_matrix is None:
-            raise ValueError('DiffCo: you passed in some existing parameters but not both of gains and hypothesis')
+            self.kernel_matrix = torch.zeros((num_init_points, num_init_points), dtype=X.dtype)
+        elif gains is None or hypothesis is None or kernel_matrix is None:
+            raise ValueError('DiffCo: you passed in some existing parameters but not all three of gains, hypothesis, and kernel_matrix')
         else:
             self.gains = gains
             self.hypothesis = hypothesis
-            # self.kernel_matrix = kernel_matrix
-        self.kernel_matrix = torch.zeros((num_init_points, num_init_points), dtype=X.dtype)
+            self.kernel_matrix = kernel_matrix
         # self.kernel_matrix = 1/(1+self.gamma/2*np.sum((K-K.transpose(1, 0, 2))**2, axis=2))**2
         # self.max_n_support = 200 # Not enforced, might be a TODO
     

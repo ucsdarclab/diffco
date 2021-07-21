@@ -60,6 +60,17 @@ def anglin(q1, q2, num=50, endpoint=True):
     dq = torch.from_numpy(np.linspace(np.zeros_like(q1), wrap2pi(q2-q1), num, endpoint))
     return wrap2pi(q1 + dq)
 
+def DH2mat(q, a, d, s_alpha, c_alpha):
+    c_theta = q.cos() # n * self.dof
+    s_theta = q.sin()
+    tfs = torch.stack([
+        torch.stack([c_theta, -s_theta*c_alpha, s_theta*s_alpha, a*c_theta], dim=2),
+        torch.stack([s_theta, c_theta*c_alpha, -c_theta * s_alpha, a * s_theta], dim=2),
+        torch.stack([torch.zeros_like(q), s_alpha.repeat(len(q), 1), c_alpha.repeat(len(q), 1), d.repeat(len(q), 1)], dim=2),
+        torch.stack([torch.zeros_like(q)]*3 + [torch.ones_like(q)], dim=2)
+    ], dim=2)
+    return tfs
+
 # Convert a sequence of adjacent joint angles to be numerically adjacent
 # eg. [5pi/6, -pi] will be converted to [5pi/6, pi]
 # This is for the convenience of plotting angular configuration space
@@ -111,6 +122,45 @@ def save_ompl_path(filename, path):
     with open(filename, 'w') as f:
         f.writelines([' '.join(map(str, cfg))+'\n' for cfg in p_numpy.tolist()])
         print('OMPL path saved in {}'.format(f.name))
+
+def dense_path(q, max_step=2.0):
+    denseq = []
+    for i in range(len(q)-1):
+        delta = q[i+1] - q[i]
+        dist = delta.norm()
+        num_steps = torch.ceil(dist/max_step)
+        denseq.append(q[i] + torch.arange(num_steps).reshape(-1, 1) * delta * max_step/dist)
+    denseq.append(q[-1:])
+    denseq = torch.cat(denseq)
+    assert torch.all(denseq[0] == q[0]) and torch.all(denseq[-1] == q[-1])
+    return denseq
+
+def load_dataset(filename: str, robot_name='2d', group=None, num_class=1):
+    if filename.endswith('.pt'):
+        return torch.load(filename)
+    elif filename.endswith('.csv'):
+        dataset = {}
+        all_data = torch.from_numpy(np.loadtxt(filename, delimiter=',', ndmin=2, dtype=np.float32))
+        assert all_data.dtype in [torch.float32, torch.double]
+        dataset['data'] = all_data[:, :-2*num_class]
+        dataset['label'] = all_data[:, -2*num_class:-num_class]
+        dataset['dist'] = all_data[:, -num_class:]
+        dataset['obs'] = None
+        if robot_name == 'panda':
+            from .model import PandaFK
+            dataset['robot'] = PandaFK
+        elif robot_name == 'baxter' and group == 'left_arm':
+            from .model import BaxterLeftArmFK
+            dataset['robot'] = BaxterLeftArmFK
+        elif robot_name == 'baxter' and group == 'both_arms':
+            from .model import BaxterDualArmFK
+            dataset['robot'] = BaxterDualArmFK
+        else:
+            raise NotImplementedError()
+    return dataset
+        
+        
+        
 
 
 if __name__ == "__main__":

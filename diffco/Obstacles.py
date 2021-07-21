@@ -46,13 +46,13 @@ class Simple1DDynamicObstacle:
         self.size = size
         self.position_func = position_func
 
-    def is_collision(self, point, t, distance=True):
-        ''' point is the query point, p is the center of the obstacle
+    def is_collision(self, st_point, distance=True):
+        ''' st_point is the query point (joints, time), p is the center of the obstacle
             distance indicates whether to return collision distance
         '''
 
-        p = self.position_func(t)
-        d = torch.abs(point-p) - self.size/2
+        p = self.position_func(st_point[:, -1:])
+        d = self.size/2 - torch.abs(st_point[:, :-1]-p)
         in_collision = d > 0 # point >= p-self.size/2 and point <= p+self.size/2
         # if in_collision:
         #     d = torch.minimum(point - p + self.size/2, p + self.size/2 - point)
@@ -62,3 +62,30 @@ class Simple1DDynamicObstacle:
             return in_collision, d
         else:
             return in_collision
+
+class ObstacleMotion:
+    def predict(self, t):
+        raise NotImplementedError
+    
+    def __call__(self, *args, **kwargs):
+        return self.predict(*args, **kwargs)
+
+class LinearMotion(ObstacleMotion):
+    def __init__(self, A, B):
+        self.A = A
+        self.B = B
+
+    def predict(self, t):
+        return self.A * t + self.B
+
+class SineMotion(ObstacleMotion):
+    def __init__(self, A, alpha, beta, bias):
+        self.A = A
+        self.alpha = alpha
+        self.beta = beta
+        self.bias = bias
+    
+    def predict(self, t):
+        return self.A*torch.sin(self.alpha*t+self.beta) + self.bias
+
+# class ComposeMotion # TODO

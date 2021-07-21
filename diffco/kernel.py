@@ -145,7 +145,7 @@ class TemporalFKKernel(KernelFunc):
         self.fkine = fkine
         self.rqkernel = rqkernel
         self.t_rqkernel = t_rqkernel
-        self.alpha = alpha
+        self.alpha = alpha # (power) weight on time. \in [1, +\infty]
     
     def __call__(self, xs, x_primes):
         '''
@@ -157,8 +157,12 @@ class TemporalFKKernel(KernelFunc):
         x_primes, t_primes = x_primes[:, :-1], x_primes[:, -1:]
         xs_controls = self.fkine(xs).reshape(len(xs), -1)
         x_primes_controls = self.fkine(x_primes).reshape(len(x_primes), -1)
-        return self.alpha * self.rqkernel(xs_controls, x_primes_controls) \
-            + (1-self.alpha) * self.t_rqkernel(ts, t_primes)
+        return self.rqkernel(xs_controls, x_primes_controls) * \
+            self.t_rqkernel(ts, t_primes)**self.alpha # debugging
+        # return self.rqkernel( #self.alpha * 
+        #     torch.hstack([xs_controls, ts]),
+        #     torch.hstack([x_primes_controls, t_primes]))# \
+        #     #+ (1-self.alpha) * self.t_rqkernel(ts, t_primes) # debugging
 
 class LineKernel(KernelFunc):
     def __init__(self, point_kernel):

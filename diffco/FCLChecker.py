@@ -44,18 +44,22 @@ class FCLChecker(CollisionChecker):
         return self.predict(X, distance=True)[1]
 
 class Simple1DDynamicChecker(CollisionChecker):
-    def __init__(self, obstacles):
+    def __init__(self, obstacles, robot):
         super().__init__(obstacles)
+        self.robot = robot
     
-    def predict(self, X, ts, distance=True):
+    def predict(self, X, distance=True):
+        if X.ndim == 1:
+            X = X[None, :]
         # labels = torch.FloatTensor(len(X))
         # dists = torch.FloatTensor(len(X)) if distance else None
-        res = [obs.is_collision(X, ts, distance=distance) for obs in self.obstacles]
+        X = self.robot.unnormalize(X)
+        res = [obs.is_collision(X, distance=distance) for obs in self.obstacles]
         labels, dists = tuple(zip(*res))
         labels = (torch.vstack(labels).sum(dim=1) > 0) * 2 - 1
         if not distance:
             return labels
-        dists = torch.max(torch.vstack(dists), dim=1)
+        dists = torch.max(torch.hstack(dists), dim=1).values
         # for i, (cfg, t) in enumerate(zip(X, ts)):
         #     res = [obs.is_collision(cfg[0], t) for obs in self.obstacles]
         #     in_collision = any([r[0] for r in res])

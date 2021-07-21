@@ -38,7 +38,7 @@ class DiffCo(CollisionChecker):
 
     def train(self, X, y, max_iteration=1000, method='original', distance=None, keep_all=False):
         self.train_method = method
-        self.distance = distance
+        self.distance = distance.reshape(-1) if distance is not None else None
         time_start = time()
         if method == 'original':
             self.train_perceptron(X, y, max_iteration)
@@ -78,6 +78,7 @@ class DiffCo(CollisionChecker):
             if self.kernel_matrix[min_i, min_i] == 0:
                 self.kernel_matrix[min_i] = self.kernel_func(self.support_points[min_i], self.support_points)
                 self.kernel_matrix[:, min_i] = self.kernel_matrix[min_i]
+                # print(self.kernel_matrix[:, min_i], self.kernel_matrix[:, min_i].max(), self.kernel_matrix[:, min_i].min())
             if min_margin <= 0:
                 delta_gain = (self.beta**((1+self.y[min_i])/2)*self.y[min_i] - self.hypothesis[min_i])/self.kernel_matrix[min_i, min_i]# 
                 # assert delta_gain > -1000 and delta_gain < 1000
@@ -103,7 +104,8 @@ class DiffCo(CollisionChecker):
     
     def initialize(self, X, y):
         self.support_points = X.clone()
-        self.y = y.clone()
+        self.y = y.reshape(-1).clone()
+        assert len(y) == len(X)
         num_init_points = len(X)
         # self.support_points = torch.rand((num_init_points, 2), dtype=torch.float32) * 10
         self.gains = torch.zeros(num_init_points, dtype=X.dtype)
@@ -161,7 +163,7 @@ class DiffCo(CollisionChecker):
             y = self.distance
         elif 'label' in target:
             y = self.y
-        self.rbf_kernel = kernel.MultiQuadratic(rbfi.epsilon) if kernel_func is None else kernel_func
+        self.rbf_kernel = kernel_func
         kmat = self.rbf_kernel(X, X)
 
         self.rbf_nodes = torch.solve(y[:, None], kmat).solution.reshape(-1)

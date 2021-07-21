@@ -315,7 +315,7 @@ def create_plots(robot, obstacles, dist_est, checker):
                 # score_DiffCo = checker.score(grid_points).reshape(size)
                 # score = (torch.sign(score_DiffCo)+1)/2*(score_spline-score_spline.min()) + (-torch.sign(score_DiffCo)+1)/2*(score_spline-score_spline.max())
                 score = score_spline[:, :, cat]
-                color_mesh = c_ax.pcolormesh(xx, yy, score, cmap=cmaps[cat], vmin=-torch.abs(score).max(), vmax=torch.abs(score).max())
+                color_mesh = c_ax.pcolormesh(xx, yy, score, cmap=cmaps[cat], vmin=-torch.abs(score).max(), vmax=torch.abs(score).max(), shading='auto')
                 c_support_points = checker.support_points[checker.gains[:, cat] != 0]
                 c_ax.scatter(c_support_points[:, 0], c_support_points[:, 1], marker='.', c='black', s=1.5)
                 c_ax.contour(xx, yy, score, levels=[0], linewidths=1, alpha=0.4, ) #-1.5, -0.75, 0, 0.3
@@ -639,22 +639,25 @@ def main(checking_method='diffco'):
         cfgs = torch.cat([exploit_samples, explore_samples, checker.support_points])
         labels, dists = gt_checker.predict(cfgs, distance=True)
         dists = dists.double()
+        labels = labels.double()
         print('Collision {}, Free {}\n'.format((labels == 1).sum(), (labels==-1).sum()))
 
         gains = torch.cat([torch.zeros(len(exploit_samples)+len(explore_samples), checker.num_class, dtype=checker.gains.dtype), checker.gains]) #None # 
         #TODO: bug: not calculating true hypothesis for new points
         added_hypothesis = checker.score(cfgs[:-len(checker.support_points)])
         hypothesis = torch.cat([added_hypothesis, checker.hypothesis]) # torch.cat([torch.zeros(len(exploit_samples)+len(explore_samples), checker.num_class), checker.hypothesis]) # None # 
-        # kernel_matrix = torch.zeros(len(cfgs), len(cfgs)) #None # 
-        # kernel_matrix[-len(checker.kernel_matrix):, -len(checker.kernel_matrix):] = checker.kernel_matrix
+        kernel_matrix = torch.zeros(len(cfgs), len(cfgs)) #None # 
+        kernel_matrix[-len(checker.kernel_matrix):, -len(checker.kernel_matrix):] = checker.kernel_matrix
+        kernel_matrix[-len(checker.kernel_matrix):, :-len(checker.kernel_matrix)] = checker.kernel_func(checker.support_points, cfgs[:-len(checker.support_points)])
+        kernel_matrix[:-len(checker.kernel_matrix), -len(checker.kernel_matrix):] = kernel_matrix[-len(checker.kernel_matrix):, :-len(checker.kernel_matrix)].T
 
-        checker.train(cfgs, labels, gains=gains, hypothesis=hypothesis, distance=dists) #, kernel_matrix=kernel_matrix
+        checker.train(cfgs, labels, gains=gains, hypothesis=hypothesis, distance=dists, kernel_matrix=kernel_matrix)
         print('Num of support points {}'.format(len(checker.support_points)))
         checker.fit_poly(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine, reg=0.1)
         update_ts.append(time()-ut)
         
         if checking_method == 'fcl':
-            fcl_options = {
+            options = {
                 'N_WAYPOINTS': 20,
                 'NUM_RE_TRIALS': 5, # Debugging
                 'MAXITER': 200,
@@ -662,11 +665,12 @@ def main(checking_method='diffco'):
                 'history': False
             }
         elif checking_method == 'diffco':
-            diffco_options = {
+            options = {
                 'N_WAYPOINTS': 20,
                 'NUM_RE_TRIALS': 5, # Debugging
                 'MAXITER': 200,
-                'safety_margin': -0.5, #max(1/5*min_score, -0.5),
+                'safety_margin': 0, #max(1/5*min_score, -0.5),
+                'max_speed': 1.5,
                 'seed': seed,
                 'history': False
             }
@@ -677,9 +681,9 @@ def main(checking_method='diffco'):
             obstacles[0][1] = (trans[0], trans[1])
             cfg_path_plots = []
             if robot.dof > 2:
-                fig, ax, link_plot, joint_plot, eff_plot = create_plots(robot, obstacles, dist_est, checker)
+                fig, ax, link_plot, joint_plot, eff_plot = create_plots(robot, obstacles, lambda x: dist_est(x)-options['safety_margin'], checker)
             elif robot.dof == 2:
-                fig, ax, link_plot, joint_plot, eff_plot, cfg_path_plots = create_plots(robot, obstacles, dist_est, checker)
+                fig, ax, link_plot, joint_plot, eff_plot, cfg_path_plots = create_plots(robot, obstacles, lambda x: dist_est(x)-options['safety_margin'], checker)
             
             ot = time()
             # Begin optimization==========
@@ -687,11 +691,11 @@ def main(checking_method='diffco'):
                 # p, path_history, num_trial, num_step = traj_optimize(
                 #     robot, dist_est, start_cfg, target_cfg, history=False)
                 solution_rec = givengrad_traj_optimize(
-                    robot, dist_est, start_cfg, target_cfg, options=diffco_options)
+                    robot, dist_est, start_cfg, target_cfg, options=options)
                 p = torch.FloatTensor(solution_rec['solution'])
             elif checking_method == 'fcl':
                 solution_rec = gradient_free_traj_optimize(
-                    robot, lambda cfg: gt_checker.predict(cfg, distance=False), start_cfg, target_cfg, options=fcl_options)
+                    robot, lambda cfg: gt_checker.predict(cfg, distance=False), start_cfg, target_cfg, options=options)
                 p = torch.FloatTensor(solution_rec['solution'])
             # ============================
             plan_ts.append(time()-ot)

@@ -5,16 +5,7 @@ from diffco import kernel
 from matplotlib import pyplot as plt
 import numpy as np
 import torch
-from diffco.model import BaxterFK
-# import fcl
-# from scipy import ndimage
-# from matplotlib import animation
-# from matplotlib.patches import Rectangle, FancyBboxPatch, Circle
-# import seaborn as sns
-# sns.set()
-# import matplotlib.patheffects as path_effects
-# from diffco import utils
-# from diffco.Obstacles import FCLObstacle
+from diffco.model import BaxterLeftArmFK, PandaFK
 
 import rospy
 import moveit_commander
@@ -31,7 +22,7 @@ if __name__ == "__main__":
     rospy.init_node('DiffCoplusDataGenerator', anonymous=True)
     robot = moveit_commander.RobotCommander()
     scene = moveit_commander.PlanningSceneInterface()
-    group_name = "left_arm"
+    group_name = "panda_arm"
     move_group = moveit_commander.MoveGroupCommander(group_name)
     sv_srv = rospy.ServiceProxy('/check_state_validity', GetStateValidity)
 
@@ -87,11 +78,11 @@ if __name__ == "__main__":
     #     wait_for_state_update(box_name, box_is_known=True)
     
     
-    env_name = 'catontable'
+    env_name = 'bookshelvessmall'
 
-    robot_name = 'baxter'
+    robot_name = 'panda'
     DOF = 7
-    robot = BaxterFK()
+    robot = PandaFK()
 
     np.random.seed(1917)
     torch.random.manual_seed(1917)
@@ -103,11 +94,12 @@ if __name__ == "__main__":
     # req = fcl.CollisionRequest(num_max_contacts=100, enable_contact=True)
     
     rs = RobotState()
-    rs.joint_state.name = ['left_s0', 'left_s1', 'left_e0', 'left_e1', 'left_w0', 'left_w1', 'left_w2']
+    # rs.joint_state.name = ['left_s0', 'left_s1', 'left_e0', 'left_e1', 'left_w0', 'left_w1', 'left_w2'] # Baxter
+    rs.joint_state.name = [f'panda_joint{j}' for j in range(1, 8)] # panda
     gsvr = GetStateValidityRequest()
     gsvr.robot_state = rs
     gsvr.group_name = group_name
-    for i, cfg in tqdm(enumerate(cfgs)):
+    for i, cfg in enumerate(tqdm(cfgs)):
         rs.joint_state.position = cfg
         result = sv_srv.call(gsvr)
 

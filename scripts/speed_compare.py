@@ -16,7 +16,7 @@ sns.set()
 import matplotlib.patheffects as path_effects
 from diffco import utils
 from diffco.Obstacles import FCLObstacle
-from scipy.optimize import minimize as fmin
+from scipy.optimize import minimize
 from diffco.FCLChecker import FCLChecker
 from time import time
 from tqdm import tqdm
@@ -296,6 +296,7 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
     NUM_RE_TRIALS = options['NUM_RE_TRIALS'] # 10
     MAXITER = options['MAXITER'] # 200
     safety_margin = options['safety_margin']
+    max_speed = options['max_speed']
 
     seed = options['seed']
     torch.manual_seed(seed)
@@ -318,7 +319,7 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
         var_p_max_move = pre_process(p)
         latest_p_max_move = var_p_max_move.data[1:-1].numpy().reshape(-1)
         control_points = robot.fkine(var_p_max_move)
-        max_move_cost = -torch.clamp_((control_points[1:]-control_points[:-1]).pow(2).sum(dim=2)-1.5**2, min=0).sum()
+        max_move_cost = -torch.clamp_((control_points[1:]-control_points[:-1]).pow(2).sum(dim=2)-max_speed**2, min=0).sum()
         return max_move_cost.data.numpy()
     def grad_con_max_move(p):
         if all(p == latest_p_max_move):
@@ -384,6 +385,8 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
 
     start_t = time()
     success = False
+    lowest_const_loss = np.inf
+    solution = None
     for trial_time in range(NUM_RE_TRIALS):
         if trial_time == 0:
             if 'init_solution' in options:
@@ -397,7 +400,7 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
             init_path = init_path * (robot.limits[:, 1]-robot.limits[:, 0]) + robot.limits[:, 0]
         init_path[0] = start_cfg
         init_path[-1] = target_cfg
-        res = fmin(cost, init_path[1:-1].reshape(-1).numpy(), jac=grad_cost,
+        res = minimize(cost, init_path[1:-1].reshape(-1).numpy(), jac=grad_cost,
             method='slsqp',
             constraints=[
                 {'fun': con_max_move, 'type': 'ineq', 'jac': grad_con_max_move},
@@ -407,10 +410,15 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
             options={'maxiter': MAXITER, 'disp': False})
         if res.success:
             success = True
+            solution = res.x
             break
+        tmp_loss = 10 * con_max_move(res.x) + con_collision_free(res.x) # + con_joint_limit(res.x)
+        if tmp_loss < lowest_const_loss: 
+            lowest_const_loss = tmp_loss
+            solution = res.x
     end_t = time()
-    res.x = res.x.reshape([-1, robot.dof])
-    res.x = pre_process(res.x)
+    solution = solution.reshape([-1, robot.dof])
+    solution = pre_process(solution)
     rec = {
         'start_cfg': start_cfg.numpy().tolist(),
         'target_cfg': target_cfg.numpy().tolist(),
@@ -419,7 +427,7 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
         'time': end_t - start_t,
         'success': success,
         'seed': seed,
-        'solution': res.x.data.numpy().tolist()
+        'solution': solution.data.numpy().tolist()
     }
     return rec
 
@@ -473,7 +481,7 @@ def gradient_free_traj_optimize(robot, checker, start_cfg, target_cfg, options=N
             init_path = init_path * (robot.limits[:, 1]-robot.limits[:, 0]) + robot.limits[:, 0]
         init_path[0] = start_cfg
         init_path[-1] = target_cfg
-        res = fmin(cost, init_path[1:-1].reshape(-1).numpy(), 
+        res = minimize(cost, init_path[1:-1].reshape(-1).numpy(), 
             constraints=[
                 {'fun': con_max_move, 'type': 'ineq'},
                 {'fun': con_collision_free, 'type': 'ineq'},

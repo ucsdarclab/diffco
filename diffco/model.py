@@ -3,7 +3,7 @@ import torch
 import numpy as np
 from numpy import pi
 from scipy.spatial.transform import Rotation
-from .utils import rot_2d, euler2mat
+from .utils import rot_2d, euler2mat, DH2mat, rotz
 import trimesh
 
 class Model():
@@ -156,7 +156,8 @@ class DHParameters():
         self.d = torch.FloatTensor(d)
         self.theta = torch.FloatTensor(theta)
 
-class BaxterFK(Model):
+class BaxterLeftArmFK(Model):
+    # Left arm of Baxter robot
     def __init__(self):
         # measurement source: 
         # https://www.ohio.edu/mechanical-faculty/williams/html/pdf/BaxterKinematics.pdf
@@ -183,7 +184,7 @@ class BaxterFK(Model):
         self.dhparams = DHParameters(
             a = [L[1], 0, L[3], 0, L[5], 0, 0],
             alpha=[-pi/2, pi/2, -pi/2, pi/2, -pi/2, pi/2, 0],
-            d=[L[0], 0, L[2], 0, L[4], 0, L[6]],
+            d=  [L[0], 0, L[2], 0, L[4], 0, L[6]],
             theta=[0, pi/2, 0, 0, 0, 0, 0]
         )
         self.c_alpha = self.dhparams.alpha.cos()
@@ -197,14 +198,141 @@ class BaxterFK(Model):
             return self.fkine_backup
         q = torch.reshape(q, (-1, self.dof))
         angles = q + self.dhparams.theta
-        c_theta = angles.cos() # n * self.dof
-        s_theta = angles.sin()
-        tfs = torch.stack([
-            torch.stack([c_theta, -s_theta*self.c_alpha, s_theta*self.s_alpha, self.dhparams.a*c_theta], dim=2),
-            torch.stack([s_theta, c_theta*self.c_alpha, -c_theta * self.s_alpha, self.dhparams.a * s_theta], dim=2),
-            torch.stack([torch.zeros_like(q), self.s_alpha.repeat(len(q), 1), self.c_alpha.repeat(len(q), 1), self.dhparams.d.repeat(len(q), 1)], dim=2),
-            torch.stack([torch.zeros_like(q)]*3 + [torch.ones_like(q)], dim=2)
-        ], dim=2)
+        tfs = DH2mat(angles, self.dhparams.a, self.dhparams.d, self.s_alpha, self.c_alpha)
+        assert tfs.shape == (len(q), self.dof, 4, 4)
+        cum_tfs = []
+        tmp_tf = tfs[:, 0]
+        if self.fk_mask[0]:
+            cum_tfs.append(tmp_tf)
+        for i in range(1, self.dof):
+            tmp_tf = torch.bmm(tmp_tf, tfs[:, i])
+            if self.fk_mask[i]:
+                cum_tfs.append(tmp_tf)
+        self.fkine_backup = torch.stack([t[:, :3, 3] for t in cum_tfs], dim=1)
+        return self.fkine_backup
+
+class BaxterDualArmFK(Model):
+    def __init__(self):
+        # measurement source: 
+        # https://www.ohio.edu/mechanical-faculty/williams/html/pdf/BaxterKinematics.pdf
+        self.limits = torch.FloatTensor([[-1.70167993878, 1.70167993878],
+                        [-2.147, 1.047],
+                        [-3.05417993878, 3.05417993878],
+                        [-0.05, 2.618],
+                        [-3.059, 3.059],
+                        [-1.57079632679, 2.094],
+                        [-3.059, 3.059]]).repeat(2, 1)
+        assert self.limits.shape == (14, 2)
+        L = torch.FloatTensor([
+            270.35, # L0
+            69,     # L1
+            364.35, # L2
+            69,     # L3
+            374.29, # L4
+            10,     # L5
+            387.35  # L6, from the center of wrist-pitch to the end effector tip
+            ]) / 1000
+        self.L = L
+        offsets = torch.FloatTensor([278, 64, 1104]) / 1000 # (L, h, H) in the document
+        
+        # modeling source: 
+        # https://www.researchgate.net/publication/299640286_Baxter_Kinematic_Modeling_Validation_and_Reconfigurable_Representation
+        self.left_dhparams = DHParameters(
+            a = [L[1], 0, L[3], 0, L[5], 0, 0],
+            alpha=[-pi/2, pi/2, -pi/2, pi/2, -pi/2, pi/2, 0],
+            d=  [L[0], 0, L[2], 0, L[4], 0, L[6]],
+            theta=[0, pi/2, 0, 0, 0, 0, 0]
+        )
+        self.right_dhparams = DHParameters(
+            a = [L[1], 0, L[3], 0, L[5], 0, 0],
+            alpha=[-pi/2, pi/2, -pi/2, pi/2, -pi/2, pi/2, 0], # different from the document, all alphas of right arms have been reverted to align with urdf
+            d=  [L[0], 0, L[2], 0, L[4], 0, L[6]],
+            theta=[0, pi/2, 0, 0, 0, 0, 0]
+        )
+        self.c_left_alpha = self.left_dhparams.alpha.cos()
+        self.s_left_alpha = self.left_dhparams.alpha.sin()
+        self.c_right_alpha = self.right_dhparams.alpha.cos()
+        self.s_right_alpha = self.right_dhparams.alpha.sin()
+        
+        left_base = torch.zeros(1, 4, 4)
+        left_base[:, :3, :3] = rotz(torch.tensor([-pi/4]))
+        left_base[:, :, 3] = torch.tensor([offsets[0], -offsets[1], offsets[2], 1])
+        right_base = torch.zeros(1, 4, 4)
+        right_base[:, :3, :3] = rotz(torch.tensor([-3*pi/4]))
+        right_base[:, :, 3] = torch.tensor([-offsets[0], -offsets[1], offsets[2], 1])
+        self.arm_bases = torch.cat([left_base, right_base], dim=0)
+        self.arm_bases = self.arm_bases[None, :] # shape=(1, 2, 4, 4)
+
+        self.dof = 14
+        self.fk_mask = [True, False, True, False, True, False, True]
+        self.fkine_backup = None
+    
+    def fkine(self, q, reuse=False):
+        if reuse:
+            return self.fkine_backup
+        q = torch.reshape(q, (-1, self.dof))
+        l_angles = q[:, :self.dof//2] + self.left_dhparams.theta
+        r_angles = q[:, self.dof//2:] + self.right_dhparams.theta
+        l_tfs = DH2mat(l_angles, self.left_dhparams.a, self.left_dhparams.d, self.s_left_alpha, self.c_left_alpha)
+        r_tfs = DH2mat(r_angles, self.right_dhparams.a, self.right_dhparams.d, self.s_right_alpha, self.c_right_alpha)
+        assert l_tfs.shape == (len(q), self.dof // 2, 4, 4) and r_tfs.shape == (len(q), self.dof // 2, 4, 4)
+        tfs = torch.stack([l_tfs, r_tfs], dim=2) # (len(q), self.dof//2, 2, 4, 4)
+        cum_tfs = []
+        tmp_tf = self.arm_bases
+        for i in range(0, self.dof // 2): # transformations for both arms are done in the same iteration
+            tmp_tf = torch.matmul(tmp_tf, tfs[:, i]) # (len(q), 2, 4, 4)
+            if self.fk_mask[i]:
+                cum_tfs.append(tmp_tf)
+        self.fkine_backup = torch.cat([t[:, :, :3, 3] for t in cum_tfs], dim=1) # (len(q), 2 * sum(self.fk_mask), 3)
+        return self.fkine_backup
+
+
+class PandaFK(Model):
+    def __init__(self):
+        # measurement source: 
+        # https://frankaemika.github.io/docs/control_parameters.html
+        self.limits = torch.FloatTensor([[-2.8973, 2.8973],
+                        [-1.7628, 1.7628],
+                        [-2.8973, 2.8973],
+                        [-3.0718, -0.0698],
+                        [-2.8973, 2.8973],
+                        [-0.0175, 3.7525],
+                        [-2.8973, 2.8973]])
+        L = torch.FloatTensor([
+            0.3330, # L0
+            0.3160, # L1
+            0.0825, # L2, Between joint 3 and joint 4 
+            0.3840, # L3
+            0.0880, # L4
+            0.1070*2, # L5
+            ])
+        self.L = L
+        
+        # modeling source: 
+        # https://www.researchgate.net/publication/299640286_Baxter_Kinematic_Modeling_Validation_and_Reconfigurable_Representation
+        self.dhparams = DHParameters(
+            # a =   [   0,     0,    0, L[2], -L[2],    0, L[4]],
+            # alpha=[   0, -pi/2, pi/2, pi/2, -pi/2, pi/2, pi/2],
+            # d=    [L[0],     0, L[1],    0,  L[3],    0, L[5]],
+            # theta=[   0,     0,    0,    0,     0,    0,    0]
+            a =   [    0,    0, L[2], -L[2],    0, L[4],     0],
+            alpha=[-pi/2, pi/2, pi/2, -pi/2, pi/2, pi/2,     0],
+            d=    [ L[0],     0, L[1],    0,  L[3],    0, L[5]],
+            theta=[    0,     0,    0,    0,     0,    0,    0]
+        )
+        print(self.dhparams.a, self.dhparams.alpha, self.dhparams.d)
+        self.c_alpha = self.dhparams.alpha.cos()
+        self.s_alpha = self.dhparams.alpha.sin()
+        self.dof = 7
+        self.fk_mask = [True, False, True, True, True, False, True]
+        self.fkine_backup = None
+    
+    def fkine(self, q, reuse=False):
+        if reuse:
+            return self.fkine_backup
+        q = torch.reshape(q, (-1, self.dof))
+        angles = q + self.dhparams.theta
+        tfs = DH2mat(angles, self.dhparams.a, self.dhparams.d, self.s_alpha, self.c_alpha)
         assert tfs.shape == (len(q), self.dof, 4, 4)
         cum_tfs = []
         tmp_tf = tfs[:, 0]
@@ -219,16 +347,23 @@ class BaxterFK(Model):
 
 class PointRobot1D(Model):
     def __init__(self, limits):
+        # limits: (dof+1) x 2. Last dimension for time.
         self.limits = torch.FloatTensor(limits)
         self.dof = 1
         pass
 
     def fkine(self, q):
         '''
-        Assume q is from [0, 1]
+        Assume q is from [0, 1], d dimensions
         '''
         q = torch.reshape(q, (-1, self.dof))
-        return q * (self.limits[:, 1] - self.limits[:, 0]) + self.limits[:, 0]
+        return q * (self.limits[:-1, 1] - self.limits[:-1, 0]) + self.limits[:-1, 0]
+    
+    def normalize(self, q):
+        return (q-self.limits[:, 0]) / (self.limits[:, 1]-self.limits[:, 0])
+    
+    def unnormalize(self, q):
+        return q * (self.limits[:, 1]-self.limits[:, 0]) + self.limits[:, 0]
 
 def main():
     lw_data = 0.3
@@ -325,9 +460,46 @@ def test_rigid_body():
     ])
     robot = RigidBody('data/Home_robot.dae', [[0, 0, 0]], transform=transformation_for_home_environment)
 
+def test_robot(RobotClass: Model, cfg):
+    from matplotlib import pyplot as plt
+    from mpl_toolkits import mplot3d
+    ax = plt.subplot(projection='3d')
+
+    robot = RobotClass()
+    control_points = robot.fkine(cfg)[0]
+    if 'dual' in RobotClass.__name__.lower():
+        l_control_points = torch.cat([torch.zeros(1, 3), control_points[0::2]], dim=0)
+        r_control_points = torch.cat([torch.zeros(1, 3), control_points[1::2]], dim=0)
+        print(l_control_points.norm(dim=1))
+        print(r_control_points.norm(dim=1))
+        ax.plot(l_control_points[:, 0], l_control_points[:, 1], l_control_points[:, 2], c='green')
+        ax.scatter(l_control_points[0, 0], l_control_points[0, 1], l_control_points[0, 2], c='green')
+        ax.plot(r_control_points[:, 0], r_control_points[:, 1], r_control_points[:, 2], c='red')
+        ax.scatter(r_control_points[0, 0], r_control_points[0, 1], r_control_points[0, 2], c='green')
+    else:
+        print(control_points.norm(dim=1))
+        ax.plot(control_points[:, 0], control_points[:, 1], control_points[:, 2])
+        ax.scatter(control_points[0, 0], control_points[0, 1], control_points[0, 2], c='green')
+    ax.axis('auto')
+    ax.set_xlim3d(-2, 2)
+    ax.set_ylim3d(-2, 2)
+    ax.set_zlim3d(0, 4)
+    plt.show()
+
 if __name__ == "__main__":
     # main() # the main test
-    test_rigid_body() # test if the RigidBody model works
+    # test_rigid_body() # test if the RigidBody model works
+    # cfg = torch.FloatTensor([-67, 21, 65, -41, -18, 138, 39]) / 180*pi
+    # cfg = torch.FloatTensor([-111, -83, 95, -84, -16, 149, 137])/180*pi
+    # test_robot(PandaFK, cfg) # plot the kinematic chain of the robot
+    cfg = torch.FloatTensor([
+        45, -39, 0, 39, -75, 30, 0,
+        # -39, -39, 0, 39, 0, 0, 0,
+        # 0, 0, 0, 0, 0, 0, 0,
+        45, -39, 0, 39, -75, 30, 0,
+    ]) / 180*pi
+    # cfg = torch.zeros(14)
+    test_robot(BaxterDualArmFK, cfg)
 
 
 

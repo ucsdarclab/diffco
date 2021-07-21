@@ -5,6 +5,7 @@ The best to use this is to comment/uncomment certain lines depending on the purp
 
 import sys
 import json
+import pickle
 from diffco import DiffCo, MultiDiffCo
 from diffco import kernel
 from matplotlib import pyplot as plt
@@ -152,45 +153,63 @@ def FastronClustering(cfgs, fkine, c_ax):
     c_ax.pcolormesh(xx, yy, preds, cmap='Set1', shading='gouraud', vmin=-0.5, vmax=numClusters-0.5,  alpha=0.05)
     c_ax.grid(False, visible=False)
 
-def main(DOF, env_name, lmbda=10):
-    dataset = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name))
+def main(DOF=None, env_name=None, filename=None, lmbda=10):
+    if env_name:
+        dataset = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name))
+    elif filename:
+        dataset = torch.load(filename)
     cfgs = dataset['data']
     labels = dataset['label']
     dists = dataset['dist']
     obstacles = dataset['obs']
-    robot = dataset['robot'](*dataset['rparam'])
+    if 'rparam' in dataset:
+        robot = dataset['robot'](*dataset['rparam'])
+    else:
+        robot = dataset['robot']()
     train_num = 6000
     indices = torch.LongTensor(np.random.choice(len(cfgs), train_num, replace=False))
     fkine = robot.fkine
     # '''
+    #=============================================================
     checker = DiffCo(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(lmbda)), beta=1.0) 
     # checker = MultiDiffCo(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
     keep_all = False
-    if 'compare' not in env_name:
-        checker.train(cfgs[:train_num], labels[:train_num], max_iteration=len(cfgs[:train_num]), distance=dists[:train_num],
-            keep_all=keep_all)
-    else:
-        checker.train(cfgs[indices], labels[indices], max_iteration=len(cfgs[indices]), distance=dists[indices],
-            keep_all=keep_all)
+    # if 'compare' not in env_name:
+    #     checker.train(cfgs[:train_num], labels[:train_num], max_iteration=len(cfgs[:train_num]), distance=dists[:train_num],
+    #         keep_all=keep_all)
+    # else:
+    #     checker.train(cfgs[indices], labels[indices], max_iteration=len(cfgs[indices]), distance=dists[indices],
+    #         keep_all=keep_all)
+    checker.train(cfgs[:train_num], labels[:train_num], max_iteration=len(cfgs[:train_num]), distance=dists[:train_num],
+        keep_all=keep_all)
+    with open('results/checker_errvis.p', 'wb') as f:
+        pickle.dump(checker, f)
+        print('checker saved: {}'.format(f.name))
+    #==== The following can be used alone to save training time in debugging
+    with open('results/checker_errvis.p', 'rb') as f:
+        checker = pickle.load(f)
+        print('checker loaded: {}'.format(f.name))
 
-    # Check DiffCo test ACC
-    test_preds = (checker.score(cfgs[train_num:]) > 0) * 2 - 1
-    test_acc = torch.sum(test_preds == labels[train_num:], dtype=torch.float32)/len(test_preds.view(-1))
-    test_tpr = torch.sum(test_preds[labels[train_num:]==1] == 1, dtype=torch.float32) / len(test_preds[labels[train_num:]==1])
-    test_tnr = torch.sum(test_preds[labels[train_num:]==-1] == -1, dtype=torch.float32) / len(test_preds[labels[train_num:]==-1])
-    print('Test acc: {}, TPR {}, TNR {}'.format(test_acc, test_tpr, test_tnr))
-    print(len(checker.gains), 'Support Points')
-    # assert(test_acc > 0.9)
-
-    fitting_target = 'label' # {label, dist, hypo}
+    fitting_target = 'dist' # {label, dist, hypo}
     Epsilon = 0.01
     checker.fit_poly(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine) # epsilon=Epsilon, 
     # checker.fit_poly(kernel_func=kernel.MultiQuadratic(Epsilon), target=fitting_target, fkine=fkine)
-    # checker.fit_full_poly(epsilon=Epsilon, target=fitting_target, fkine=fkine) #, lmbd=10)
+    # checker.fit_full_poly(epsilon=Epsilon, k=3, target=fitting_target, fkine=fkine) #, lmbd=10)
     dist_est = checker.rbf_score
+    safety_margin = 0
     #  = checker.score
     # dist_est = checker.poly_score
     # '''
+    # Check DiffCo test ACC
+    test_num = len(cfgs) - train_num
+    test_preds = (dist_est(cfgs[train_num:train_num+test_num])-safety_margin > 0) * 2 - 1
+    test_labels = labels[train_num:].reshape(test_preds.shape)
+    test_acc = torch.sum(test_preds == test_labels, dtype=torch.float32)/len(test_preds.view(-1))
+    test_tpr = torch.sum(test_preds[test_labels ==1] == 1, dtype=torch.float32) / len(test_preds[test_labels ==1])
+    test_tnr = torch.sum(test_preds[test_labels ==-1] == -1, dtype=torch.float32) / len(test_preds[test_labels==-1])
+    print('Test acc: {}, TPR {}, TNR {}'.format(test_acc, test_tpr, test_tnr))
+    print(len(checker.gains), 'Support Points')
+    # assert(test_acc > 0.9)
     
     '''# =============== test error ============
     # est = est / est.std() * gt_grid.std()
@@ -198,7 +217,7 @@ def main(DOF, env_name, lmbda=10):
     #     (est-gt_grid).mean(), (est-gt_grid).std(), gt_grid.std()))
     '''
     
-    # ''' diffco 3-figure compare (work, c space 1, c space 2)==========
+    ''' diffco 3-figure compare (work, c space 1, c space 2)==========
     from diffco import DiffCo
 
     checker = DiffCo(
@@ -227,19 +246,23 @@ def main(DOF, env_name, lmbda=10):
     # plt.savefig('figs/robot_gallery/2d_{}dof_{}.jpg'.format(DOF, env_name), dpi=dpi, bbox_inches='tight')
     # plt.savefig('figs/vis_{}.png'.format(env_name), dpi=500)
     # plt.savefig('figs/new_diffco_vis.png')
-    # ''' #===============================
+    ''' #===============================
 
-    ''' =============== correlation ==============
-    # gt_grid = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name))['dist']
+    # ''' =============== correlation ==============
+    if env_name:
+        gt_grid = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name))['dist']
+    else:
+        gt_grid = dists
     # gt_grid = checker.distance
 
+    # size = [400, 400]
     # yy, xx = torch.meshgrid(torch.linspace(-np.pi, np.pi, size[0]), torch.linspace(-np.pi, np.pi, size[1]))
     # grid_points = torch.stack([xx, yy], axis=2).reshape((-1, 2))
-    # est_grid = dist_est(cfgs[train_num:])
+    est_grid = dist_est(cfgs[train_num:])
     # est_grid = dist_est(checker.support_points)
 
     # indices = np.random.choice(range(len(est_grid)), size=400, replace=False)
-    # gt_grid = gt_grid[train_num:]
+    gt_grid = gt_grid[train_num:]
     # est_grid = est_grid[indices]
 
     fig = plt.figure(figsize=(5, 5)) # temp
@@ -270,14 +293,14 @@ def main(DOF, env_name, lmbda=10):
     print('{}DOF, environment {}, with FK {}, r-squared: {}'.format(DOF, env_name, checker.fkine is not None, r_value**2))
     ax.text(xlim_max/4, -7*ylim_max/8, '$\\mathrm{R}^2='+('{:.4f}$'.format(r_value**2)), fontsize=15, 
         bbox=dict(boxstyle='round', facecolor='wheat', alpha=1))
-    ax.set_title('{} original supports, {} random samples'.format(checker.num_origin_supports, checker.n_left_out_points))
+    # ax.set_title('{} original supports, {} random samples'.format(checker.num_origin_supports, checker.n_left_out_points))
 
-    # plt.show()
-    plt.savefig('figs/correlation/training_{}dof_{}_{}_{}ransample_rsquare.png'.format(DOF, env_name, 'hybriddiffco', checker.n_left_out_points))
+    plt.show()
+    # plt.savefig('figs/correlation/training_{}dof_{}_{}_{}ransample_rsquare.png'.format(DOF, env_name, 'hybriddiffco', checker.n_left_out_points))
     # plt.savefig('figs/correlation/{}dof_{}_{}.pdf'.format(DOF, env_name, fitting_target))#, dpi=500)
     # plt.savefig('figs/correlation/{}dof_{}_{}_{}_rsquare.png'.format(DOF, env_name, fitting_target, 'woFK' if checker.fkine is None else 'withFK'), dpi=300)
     
-    ''' 
+    # ''' 
 
     ''' timing
     # times = []
@@ -311,15 +334,15 @@ def main(DOF, env_name, lmbda=10):
 if __name__ == "__main__":
     # DOF = 2
     # env_name = '1rect' # '2rect' # '1rect_1circle' '1rect' 'narrow' '2instance' 3circle
-    envs = [
-        # (2, '1rect'),
-        # (2, '3circle'),
-        # (7, '1rect_1circle_7d'),
-        (7, '3circle_7d')
-        # (3, '2class_1')
-    ]
-    for DOF, env_name in envs:
-        main(DOF, env_name, lmbda=10)
+    # envs = [
+    #     # (2, '1rect'),
+    #     # (2, '3circle'),
+    #     # (7, '1rect_1circle_7d'),
+    #     (7, '3circle_7d')
+    #     # (3, '2class_1')
+    # ]
+    # for DOF, env_name in envs:
+    #     main(DOF, env_name=env_name, lmbda=10)
     # lmbdas = np.power(10, np.arange(-1, 3, step=0.1))
     # rs = []
     # for DOF, env_name in envs:
@@ -333,3 +356,4 @@ if __name__ == "__main__":
     #     json.dump(
     #         {'lambda': lmbdas.tolist(),
     #         'rvalues': rs}, f)
+    main(filename='data/3d_baxter_self_both_arms.pt', lmbda=10)
