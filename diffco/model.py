@@ -7,6 +7,10 @@ from .utils import rot_2d, euler2mat, DH2mat, rotz
 import trimesh
 
 class Model():
+    def __init__(self):
+        self.dof = None
+        self.limits = None
+        
     def fkine(self, q):
         raise NotImplementedError
     

@@ -622,6 +622,7 @@ def main(checking_method='diffco'):
 
     update_ts = []
     plan_ts = []
+    path_costs = []
     for t, trans in zip(range(T), positions):
         ut = time()
         fcl_collision_obj[0].setTransform(fcl.Transform(
@@ -659,21 +660,23 @@ def main(checking_method='diffco'):
         if checking_method == 'fcl':
             options = {
                 'N_WAYPOINTS': 20,
-                'NUM_RE_TRIALS': 5, # Debugging
+                'NUM_RE_TRIALS': 5,
                 'MAXITER': 200,
                 'seed': seed,
                 'history': False
             }
+            dist_func = lambda x: gt_checker.predict(x)[1]
         elif checking_method == 'diffco':
             options = {
                 'N_WAYPOINTS': 20,
-                'NUM_RE_TRIALS': 5, # Debugging
+                'NUM_RE_TRIALS': 5,
                 'MAXITER': 200,
                 'safety_margin': 0, #max(1/5*min_score, -0.5),
                 'max_speed': 1.5,
                 'seed': seed,
                 'history': False
             }
+            dist_func = lambda x: dist_est(x)-options['safety_margin']
 
         print('t = {}'.format(t))
         if t % 1 == 0 and not torch.any(checker.predict(torch.stack([start_cfg, target_cfg], dim=0)) == 1):
@@ -681,9 +684,9 @@ def main(checking_method='diffco'):
             obstacles[0][1] = (trans[0], trans[1])
             cfg_path_plots = []
             if robot.dof > 2:
-                fig, ax, link_plot, joint_plot, eff_plot = create_plots(robot, obstacles, lambda x: dist_est(x)-options['safety_margin'], checker)
+                fig, ax, link_plot, joint_plot, eff_plot = create_plots(robot, obstacles, dist_func, checker)
             elif robot.dof == 2:
-                fig, ax, link_plot, joint_plot, eff_plot, cfg_path_plots = create_plots(robot, obstacles, lambda x: dist_est(x)-options['safety_margin'], checker)
+                fig, ax, link_plot, joint_plot, eff_plot, cfg_path_plots = create_plots(robot, obstacles, dist_func, checker)
             
             ot = time()
             # Begin optimization==========
@@ -701,22 +704,22 @@ def main(checking_method='diffco'):
             plan_ts.append(time()-ot)
 
             # path_dir = 'results/active_learning/path_2d_{}dof_{}_seed{}_step{:02d}.json'.format(robot.dof, env_name, seed, t) # DEBUGGING
-            path_dir = 'results/active_learning/path_2d_{}dof_{}_checker={}_seed{}_step{:02d}.json'.format(robot.dof, env_name, checking_method, seed, t)
-            with open(path_dir, 'w') as f:
-                json.dump(
-                    {
-                        'path': p.data.numpy().tolist(),
-                    },
-                    f, indent=1)
+            path_dir = f'results/active_learning/{seed}/{checking_method}'
+            makedirs(path_dir, exist_ok=True)
+            filename = f'path_2d_{robot.dof}dof_{env_name}_checker={checking_method}_seed{seed}_step{t:02d}.json'
+            with open(join(path_dir, filename), 'w') as f:
+                json.dump(solution_rec, f, indent=1)
                 print('Plan recorded in {}'.format(f.name))
             
             # Use saved path ======
-            # if not isfile(path_dir):
-            #     continue
-            # with open(path_dir, 'r') as f:
-            #     path_dict = json.load(f)
-            #     p = torch.FloatTensor(path_dict['path'])
+            if not isfile(join(path_dir, filename)):
+                continue
+            with open(join(path_dir, filename), 'r') as f:
+                solution_rec = json.load(f)
+                p = torch.FloatTensor(solution_rec['solution'])
+
             # =====================
+            path_costs.append(solution_rec['cost'])
             p = utils.make_continue(p)
             
             #animation
@@ -734,22 +737,22 @@ def main(checking_method='diffco'):
             # plt.show()
             # plt.savefig('figs/path_2d_{}dof_{}.png'.format(robot.dof, env_name), dpi=500)
             # plt.savefig('figs/active_2d_{}dof_{}_{}'.format(robot.dof, env_name, t), dpi=500)
-            fig_dir = 'figs/active/{random_seed}/{checking_method}'.format(random_seed=seed, checking_method=checking_method)
-            if not isdir(fig_dir):
-                makedirs(fig_dir)
-            plt.savefig(join(fig_dir, '2d_{DOF}dof_{ename}_{checking_method}_{step:02d}'.format(
-                DOF=robot.dof, ename=env_name, checking_method=checking_method, step=t)), dpi=300)
+            fig_dir = f'figs/active/{seed}/{checking_method}'
+            makedirs(fig_dir, exist_ok=True)
+            plt.savefig(join(fig_dir, f'2d_{robot.dof}dof_{env_name}_{checking_method}_{t:02d}'), dpi=300)
     
-    print('{} summary'.format(checking_method))
+    print('='*20)
+    print('{} summary:'.format(checking_method))
     print('Initial training {} sec.'.format(init_train_t))
     print('Update {} sec.'.format(update_ts))
     print('Planning {} sec.'.format(plan_ts))
-    
+    print(f'Path costs mean {np.mean(path_costs)}, std {np.std(path_costs)}: {path_costs}')
+    print('='*20)
     
 
 
 
 
 if __name__ == "__main__":
-    main(checking_method='diffco')
-    # main(checking_method='fcl')
+    # main(checking_method='diffco')
+    main(checking_method='fcl')

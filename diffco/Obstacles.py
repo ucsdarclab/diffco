@@ -29,13 +29,13 @@ class FCLObstacle:
         self.size = size
         self.position = position
         if shape == 'circle':
-            pos_3d = torch.FloatTensor([position[0], position[1], 0])
+            pos_3d = torch.DoubleTensor([position[0], position[1], 0])
             self.geom = fcl.Cylinder(size, 1000)
         elif shape == 'rect':
-            pos_3d = torch.FloatTensor([position[0], position[1], 0])
+            pos_3d = torch.DoubleTensor([position[0], position[1], 0])
             self.geom = fcl.Box(size[0], size[1], 1000)
         elif shape == 'mesh':
-            pos_3d = torch.FloatTensor(position)
+            pos_3d = torch.DoubleTensor(position)
             self.geom = kwargs['geom']
 
         self.cobj = fcl.CollisionObject(self.geom, fcl.Transform(pos_3d))

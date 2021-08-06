@@ -16,10 +16,12 @@ sns.set()
 import matplotlib.patheffects as path_effects
 from diffco import utils
 from diffco.Obstacles import FCLObstacle
-from scipy.optimize import minimize
 from diffco.FCLChecker import FCLChecker
 from time import time
 from tqdm import tqdm
+from motion_planner import MotionPlanner
+from itertools import product
+from trajectory_optim import adam_traj_optimize, givengrad_traj_optimize, gradient_free_traj_optimize, trustconstr_traj_optimize
 
 # A function that controls the style of visualization for debugging.
 def create_plots(robot, obstacles, dist_est, checker):
@@ -30,7 +32,7 @@ def create_plots(robot, obstacles, dist_est, checker):
         "font.family": "sans-serif",
         "font.sans-serif": ["Helvetica"]})
 
-    if robot.dof > 2:
+    if robot.dof > 2: # or True: temp
         fig = plt.figure(figsize=(3, 3))
         ax = fig.add_subplot(111) #, projection='3d'
     elif robot.dof == 2:
@@ -109,7 +111,7 @@ def create_plots(robot, obstacles, dist_est, checker):
     joint_plot, = ax.plot([], [], 'o', color='tab:red', markersize=lw)
     eff_plot, = ax.plot([], [], 'o', color='black', markersize=lw)
 
-    if robot.dof > 2:
+    if robot.dof > 2: # or True: temp
         return fig, ax, link_plot, joint_plot, eff_plot
     elif robot.dof == 2:
         return fig, ax, link_plot, joint_plot, eff_plot, cfg_path_plots
@@ -124,16 +126,16 @@ def single_plot(robot, p, fig, link_plot, joint_plot, eff_plot, cfg_path_plots=N
     
     lw = link_plot.get_lw()
     link_traj = [ax.plot(points[:, 0], points[:, 1], color='gray', alpha=traj_alpha, lw=lw, solid_capstyle='round')[0] for points in points_traj]
-    joint_traj = [ax.plot(points[:-1, 0], points[:-1, 1], 'o', color='tab:red', alpha=traj_alpha, markersize=lw)[0] for points in points_traj]
-    eff_traj = [ax.plot(points[-1:, 0], points[-1:, 1], 'o', color='black', alpha=traj_alpha, markersize=lw)[0] for points in points_traj]
+    # joint_traj = [ax.plot(points[:-1, 0], points[:-1, 1], 'o', color='tab:red', alpha=traj_alpha, markersize=lw/2)[0] for points in points_traj]
+    eff_traj = [ax.plot(points[-1:, 0], points[-1:, 1], 'o', color='black', alpha=traj_alpha, markersize=lw/2)[0] for points in points_traj]
     # for link_plot, joint_plot, eff_plot, points in zip(link_traj, joint_traj, eff_traj, points_traj):
     #     link_plot.set_data(points[:, 0], points[:, 1])
     #     joint_plot.set_data(points[:-1, 0], points[:-1, 1])
     #     eff_plot.set_data(points[-1:, 0], points[-1:, 1])
     for i in [0, -1]:
         link_traj[i].set_alpha(ends_alpha)
-        link_traj[i].set_path_effects([path_effects.SimpleLineShadow(), path_effects.Normal()])
-        joint_traj[i].set_alpha(ends_alpha)
+        # link_traj[i].set_path_effects([path_effects.SimpleLineShadow(), path_effects.Normal()])
+        # joint_traj[i].set_alpha(ends_alpha)
         eff_traj[i].set_alpha(ends_alpha)
     link_traj[0].set_color('green')
     link_traj[-1].set_color('orange')
@@ -169,344 +171,6 @@ def single_plot(robot, p, fig, link_plot, joint_plot, eff_plot, cfg_path_plots=N
 
     # plt.show()
 
-def adam_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
-    N_WAYPOINTS = options['N_WAYPOINTS'] # 20
-    NUM_RE_TRIALS = options['NUM_RE_TRIALS'] # 10
-    MAXITER = options['MAXITER'] # 200
-    history = options['history']
-
-    dif_weight = 1 # This should NOT be changed
-    max_move_weight = 10
-    collision_weight = 10
-    joint_limit_weight = 10
-    safety_margin = options['safety_margin']
-    lr = 5e-1
-    seed = options['seed']
-    torch.manual_seed(seed)
-
-    lowest_loss_solution = None
-    lowest_loss = np.inf
-    lowest_loss_obj = np.inf
-    lowest_loss_trial = None
-    lowest_loss_step = None
-    best_valid_solution = None
-    best_valid_obj = np.inf
-    best_valid_step = None
-    best_valid_trial = None
-    
-    trial_histories = []
-    cnt_check = 0
-
-    found = False
-    start_t = time()
-    for trial_time in range(NUM_RE_TRIALS):
-        path_history = []
-        if trial_time == 0:
-            if 'init_solution' in options:
-                assert isinstance(options['init_solution'], torch.Tensor)
-                init_path = options['init_solution']
-            else:
-                init_path = torch.from_numpy(np.linspace(start_cfg, target_cfg, num=N_WAYPOINTS)).double()
-        else:
-            init_path = torch.rand((N_WAYPOINTS, robot.dof)).double()
-            init_path = init_path * (robot.limits[:, 1]-robot.limits[:, 0]) + robot.limits[:, 0]
-        init_path[0] = start_cfg
-        init_path[-1] = target_cfg
-        p = init_path.requires_grad_(True)
-        opt = torch.optim.Adam([p], lr=lr)
-
-        for step in range(MAXITER):
-            opt.zero_grad()
-            collision_score = torch.clamp(dist_est(p)-safety_margin, min=0).sum()
-            cnt_check += len(p) # Counting collision checks
-            control_points = robot.fkine(p)
-            max_move_cost = torch.clamp((control_points[1:]-control_points[:-1]).pow(2).sum(dim=2)-1.5**2, min=0).sum()
-            joint_limit_cost = (
-                torch.clamp(robot.limits[:, 0]-p, min=0) + torch.clamp(p-robot.limits[:, 1], min=0)).sum()
-            diff = (control_points[1:]-control_points[:-1]).pow(2).sum()
-            constraint_loss = collision_weight * collision_score\
-                + max_move_weight * max_move_cost + joint_limit_weight * joint_limit_cost
-            objective_loss = dif_weight * diff
-            loss = objective_loss + constraint_loss
-            loss.backward()
-            p.grad[[0, -1]] = 0.0
-            opt.step()
-            p.data = utils.wrap2pi(p.data)
-            if history:
-                path_history.append(p.data.clone())
-            if loss.data.numpy() < lowest_loss:
-                lowest_loss = loss.data.numpy()
-                lowest_loss_solution = p.data.clone()
-                lowest_loss_step = step
-                lowest_loss_trial = trial_time
-                lowest_loss_obj = objective_loss.data.numpy()
-            if constraint_loss <= 1e-2:
-                if objective_loss.data.numpy() < best_valid_obj:
-                    best_valid_obj = objective_loss.data.numpy()
-                    best_valid_solution = p.data.clone()
-                    best_valid_step = step
-                    best_valid_trial = trial_time
-            # if constraint_loss <= 1e-2 or step % (MAXITER/5) == 0 or step == MAXITER-1:
-            #     print('Trial {}: Step {}, collision={:.3f}*{:.1f}, max_move={:.3f}*{:.1f}, diff={:.3f}*{:.1f}, Loss={:.3f}'.format(
-            #         trial_time, step, 
-            #         collision_score.item(), collision_weight,
-            #         max_move_cost.item(), max_move_weight,
-            #         diff.item(), dif_weight,
-            #         loss.item()))
-            if constraint_loss <= 1e-2 and torch.norm(p.grad) < 1e-4:
-                break
-        trial_histories.append(path_history)
-        
-        if best_valid_solution is not None:
-            found = True
-            break
-    end_t = time()
-    if not found:
-        # print('Did not find a valid solution after {} trials!\
-            # Giving the lowest cost solution'.format(NUM_RE_TRIALS))
-        solution = lowest_loss_solution
-        solution_step = lowest_loss_step
-        solution_trial = lowest_loss_trial
-        solution_obj = lowest_loss_obj
-    else:
-        solution = best_valid_solution
-        solution_step = best_valid_step
-        solution_trial = best_valid_trial
-        solution_obj = best_valid_obj
-    path_history = trial_histories[solution_trial] # Could be empty when history = false
-    if not path_history:
-        path_history.append(solution)
-    else:
-        path_history = path_history[:(solution_step+1)]
-    
-    rec = {
-        'start_cfg': start_cfg.numpy().tolist(),
-        'target_cfg': target_cfg.numpy().tolist(),
-        'cnt_check': cnt_check,
-        'cost': solution_obj.item(),
-        'time': end_t - start_t,
-        'success': found,
-        'seed': seed,
-        'solution': solution.numpy().tolist()
-    }
-    return rec
-
-def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
-    N_WAYPOINTS = options['N_WAYPOINTS'] # 20
-    NUM_RE_TRIALS = options['NUM_RE_TRIALS'] # 10
-    MAXITER = options['MAXITER'] # 200
-    safety_margin = options['safety_margin']
-    max_speed = options['max_speed']
-
-    seed = options['seed']
-    torch.manual_seed(seed)
-
-    global cnt_check, obj, max_move_cost, collision_cost, joint_limit_cost, call_cnt
-    global var_p_max_move, var_p_collision, var_p_limit, var_p_cost
-    global latest_p_max_move, latest_p_collision, latest_p_limit, latest_p_cost
-    cnt_check = 0
-    call_cnt = 0
-
-    def pre_process(p):
-        global var_p
-        p = torch.DoubleTensor(p).reshape([-1, robot.dof])
-        p[:] = utils.wrap2pi(p)
-        var_p = torch.cat([init_path[:1], p, init_path[-1:]], dim=0).requires_grad_(True)
-        return var_p
-
-    def con_max_move(p):
-        global max_move_cost, var_p_max_move, latest_p_max_move
-        var_p_max_move = pre_process(p)
-        latest_p_max_move = var_p_max_move.data[1:-1].numpy().reshape(-1)
-        control_points = robot.fkine(var_p_max_move)
-        max_move_cost = -torch.clamp_((control_points[1:]-control_points[:-1]).pow(2).sum(dim=2)-max_speed**2, min=0).sum()
-        return max_move_cost.data.numpy()
-    def grad_con_max_move(p):
-        if all(p == latest_p_max_move):
-            var_p_max_move.grad = None
-            max_move_cost.backward()
-            if var_p_max_move.grad is None:
-                return np.zeros(len(p), dtype=p.dtype)
-            return var_p_max_move.grad[1:-1].numpy().reshape(-1)
-        else:
-            raise ValueError('p is not the same as the lastest passed p')
-
-    def con_collision_free(p):
-        global cnt_check, collision_cost, var_p_collision, latest_p_collision
-        var_p_collision = pre_process(p)
-        latest_p_collision = var_p_collision.data[1:-1].numpy().reshape(-1)
-        cnt_check += len(p)
-        collision_cost = torch.sum(-torch.clamp_(dist_est(var_p_collision[1:-1])-safety_margin, min=0))
-        return collision_cost.data.numpy()
-    def grad_con_collision_free(p):
-        if all(p == latest_p_collision):
-            var_p_collision.grad = None
-            collision_cost.backward()
-            if var_p_collision.grad is None:
-                return np.zeros(len(p), dtype=p.dtype)
-            return var_p_collision.grad[1:-1].numpy().reshape(-1)
-        else:
-            raise ValueError('p is not the same as the lastest passed p')
-
-    def con_joint_limit(p):
-        global joint_limit_cost, var_p_limit, latest_p_limit
-        var_p_limit = pre_process(p)
-        latest_p_limit = var_p_limit.data[1:-1].numpy().reshape(-1)
-        joint_limit_cost = -torch.sum(torch.clamp_(robot.limits[:, 0]-var_p_limit, min=0)\
-             + torch.clamp_(var_p_limit-robot.limits[:, 1], min=0))
-        return joint_limit_cost.data.numpy()
-    def grad_con_joint_limit(p):
-        if all(p == latest_p_limit):
-            var_p_collision.grad = None
-            joint_limit_cost.backward()
-            if var_p_collision.grad is None:
-                return np.zeros(len(p), dtype=p.dtype)
-            return var_p_collision.grad[1:-1].numpy().reshape(-1)
-        else:
-            raise ValueError('p is not the same as the lastest passed p')
-
-    def cost(p):
-        global obj, var_p_cost, latest_p_cost
-        var_p_cost = pre_process(p)
-        latest_p_cost = var_p_cost.data[1:-1].numpy().reshape(-1)
-        control_points = robot.fkine(var_p_cost)
-        obj = (control_points[1:]-control_points[:-1]).pow(2).sum()
-        return obj.data.numpy()
-    def grad_cost(p):
-        if np.allclose(p, latest_p_cost):
-            var_p_cost.grad = None
-            obj.backward()
-            if var_p_cost.grad is None:
-                return np.zeros(len(p), dtype=p.dtype)
-            return var_p_cost.grad[1:-1].numpy().reshape(-1)
-        else:
-            print(p, latest_p_cost, np.linalg.norm(p-latest_p_cost))
-            raise ValueError('p is not the same as the lastest passed p')
-
-    start_t = time()
-    success = False
-    lowest_const_loss = np.inf
-    solution = None
-    for trial_time in range(NUM_RE_TRIALS):
-        if trial_time == 0:
-            if 'init_solution' in options:
-                assert isinstance(options['init_solution'], torch.Tensor)
-                init_path = options['init_solution']
-            else:
-                init_path = torch.from_numpy(np.linspace(start_cfg, target_cfg, num=N_WAYPOINTS, dtype=np.float64))
-        else:
-            # init_path = (torch.rand(N_WAYPOINTS, robot.dof, dtype=torch.float64))*np.pi*2-np.pi
-            init_path = torch.rand((N_WAYPOINTS, robot.dof)).double()
-            init_path = init_path * (robot.limits[:, 1]-robot.limits[:, 0]) + robot.limits[:, 0]
-        init_path[0] = start_cfg
-        init_path[-1] = target_cfg
-        res = minimize(cost, init_path[1:-1].reshape(-1).numpy(), jac=grad_cost,
-            method='slsqp',
-            constraints=[
-                {'fun': con_max_move, 'type': 'ineq', 'jac': grad_con_max_move},
-                {'fun': con_collision_free, 'type': 'ineq', 'jac': grad_con_collision_free},
-                {'fun': con_joint_limit, 'type': 'ineq', 'jac': grad_con_joint_limit}
-            ],
-            options={'maxiter': MAXITER, 'disp': False})
-        if res.success:
-            success = True
-            solution = res.x
-            break
-        tmp_loss = 10 * con_max_move(res.x) + con_collision_free(res.x) # + con_joint_limit(res.x)
-        if tmp_loss < lowest_const_loss: 
-            lowest_const_loss = tmp_loss
-            solution = res.x
-    end_t = time()
-    solution = solution.reshape([-1, robot.dof])
-    solution = pre_process(solution)
-    rec = {
-        'start_cfg': start_cfg.numpy().tolist(),
-        'target_cfg': target_cfg.numpy().tolist(),
-        'cnt_check': cnt_check,
-        'cost': res.fun.item(),
-        'time': end_t - start_t,
-        'success': success,
-        'seed': seed,
-        'solution': solution.data.numpy().tolist()
-    }
-    return rec
-
-def gradient_free_traj_optimize(robot, checker, start_cfg, target_cfg, options=None):
-    N_WAYPOINTS = options['N_WAYPOINTS']
-    NUM_RE_TRIALS = options['NUM_RE_TRIALS']
-    MAXITER = options['MAXITER']
-
-    seed = options['seed']
-    torch.manual_seed(seed)
-
-    global cnt_check
-    cnt_check = 0
-
-    def pre_process(p):
-        p = torch.DoubleTensor(p).reshape([-1, robot.dof])
-        p[:] = utils.wrap2pi(p)
-        p = torch.cat([init_path[:1], p, init_path[-1:]], dim=0)
-        return p
-
-    def con_max_move(p):
-        p = pre_process(p)
-        control_points = robot.fkine(p)
-        return -torch.clamp_((control_points[1:]-control_points[:-1]).pow(2).sum(dim=2)-1.5**2, min=0).sum().numpy()
-    def con_collision_free(p):
-        global cnt_check
-        p = pre_process(p)
-        cnt_check += len(p)
-        return torch.sum(-torch.clamp_(checker(p), min=0)).numpy()
-    def con_joint_limit(p):
-        p = pre_process(p)
-        return -torch.sum(torch.clamp_(robot.limits[:, 0]-p, min=0) + torch.clamp_(p-robot.limits[:, 1], min=0)).numpy()
-    def cost(p):
-        p_tensor = pre_process(p)
-        control_points = robot.fkine(p_tensor)
-        diff = (control_points[1:]-control_points[:-1]).pow(2).sum()
-        return diff.numpy()
-
-    start_t = time()
-    success = False
-    for trial_time in range(NUM_RE_TRIALS):
-        if trial_time == 0:
-            if 'init_solution' in options:
-                assert isinstance(options['init_solution'], torch.Tensor)
-                init_path = options['init_solution']
-            else:
-                init_path = torch.from_numpy(np.linspace(start_cfg, target_cfg, num=N_WAYPOINTS, dtype=np.float64))
-        else:
-            # init_path = (torch.rand(N_WAYPOINTS, robot.dof, dtype=torch.float64))*np.pi*2-np.pi
-            init_path = torch.rand((N_WAYPOINTS, robot.dof)).double()
-            init_path = init_path * (robot.limits[:, 1]-robot.limits[:, 0]) + robot.limits[:, 0]
-        init_path[0] = start_cfg
-        init_path[-1] = target_cfg
-        res = minimize(cost, init_path[1:-1].reshape(-1).numpy(), 
-            constraints=[
-                {'fun': con_max_move, 'type': 'ineq'},
-                {'fun': con_collision_free, 'type': 'ineq'},
-                {'fun': con_joint_limit, 'type': 'ineq'}
-            ],
-            options={'maxiter': MAXITER, 'disp': False})
-        if res.success:
-            success = True
-            break
-    end_t = time()
-
-    res.x = res.x.reshape([-1, robot.dof])
-    res.x = utils.wrap2pi(pre_process(res.x))
-    rec = {
-        'start_cfg': start_cfg.numpy().tolist(),
-        'target_cfg': target_cfg.numpy().tolist(),
-        'cnt_check': cnt_check,
-        'cost': res.fun.item(),
-        'time': end_t - start_t,
-        'success': success,
-        'seed': seed,
-        'solution': res.x.numpy().tolist()
-    }
-    return rec
-
 class ExpConfigs(object):
     # A simple class to store experiment configurations. 
     # arguments not mentioned in args will be in their default values
@@ -514,20 +178,32 @@ class ExpConfigs(object):
         # default values
         self.load_exp = None
         self.include_validate_time = True
-        self.use_previous_solution = True
+        self.use_previous_solution = False
         self.validate_density = 1
         self.only_repair = False
+        self.use_planning = False
+        self.use_repair = False
+        self.use_optim = False
+        self.valid_checker = None
+        self.num_query_per_env = 10
+        self.num_obs = None
+        self.debug_plot_interval = 0
+        self.load_key_in_json = None
 
         for k, v in args.items():
             assert hasattr(self, k)
             setattr(self, k, v)
+        
+        if self.only_repair:
+            assert self.use_repair
+        if isinstance(self.num_obs, int):
+            self.num_obs = [self.num_obs]    
 
-def test_one_env(env_name, method, folder, args: ExpConfigs, prev_rec={}):
-    assert (args.use_previous_solution and prev_rec != {}) or \
-        ((not args.use_previous_solution) and prev_rec == {}), \
-            "args.use_previous_solution does not match the existence of prev_rec."
-
-    print(env_name, method, 'Begin')
+def test_one_env(env_name, optim_method, folder, args: ExpConfigs, prev_rec=None, res_folder=None):
+    # assert (args.use_previous_solution and prev_rec != None) or \
+    #     ((not args.use_previous_solution) and prev_rec == None), \
+    #         "args.use_previous_solution does not match the existence of prev_rec."
+    print(env_name, optim_method, 'Begin')
     # Prepare distance estimator ====================
     dataset = torch.load('{}/{}.pt'.format(folder, env_name))
     cfgs = dataset['data'].double()
@@ -543,17 +219,17 @@ def test_one_env(env_name, method, folder, args: ExpConfigs, prev_rec={}):
     train_t = time()
     checker = DiffCo(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
     # checker = MultiDiffCo(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
-    if not args.use_previous_solution:
+    if not args.use_previous_solution: # or robot.dof == 2 or args.use_optim:
         checker.train(cfgs[:train_num], labels[:train_num], max_iteration=len(cfgs[:train_num]), distance=dists[:train_num])
 
         # Check DiffCo test ACC
-        # test_preds = (checker.score(cfgs[train_num:]) > 0) * 2 - 1
-        # test_acc = torch.sum(test_preds == labels[train_num:], dtype=torch.float32)/len(test_preds.view(-1))
-        # test_tpr = torch.sum(test_preds[labels[train_num:]==1] == 1, dtype=torch.float32) / len(test_preds[labels[train_num:]==1])
-        # test_tnr = torch.sum(test_preds[labels[train_num:]==-1] == -1, dtype=torch.float32) / len(test_preds[labels[train_num:]==-1])
-        # print('Test acc: {}, TPR {}, TNR {}'.format(test_acc, test_tpr, test_tnr))
-        # if test_acc < 0.9:
-        #     print('test acc is only {}'.format(test_acc))
+        test_preds = (checker.score(cfgs[train_num:]) > 0) * 2 - 1
+        test_acc = torch.sum(test_preds == labels[train_num:], dtype=torch.float32)/len(test_preds.view(-1))
+        test_tpr = torch.sum(test_preds[labels[train_num:]==1] == 1, dtype=torch.float32) / len(test_preds[labels[train_num:]==1])
+        test_tnr = torch.sum(test_preds[labels[train_num:]==-1] == -1, dtype=torch.float32) / len(test_preds[labels[train_num:]==-1])
+        print('Test acc: {}, TPR {}, TNR {}'.format(test_acc, test_tpr, test_tnr))
+        if test_acc < 0.9:
+            print('test acc is only {}'.format(test_acc))
 
         fitting_target = 'label' # {label, dist, hypo}
         Epsilon = 1 #0.01
@@ -582,7 +258,7 @@ def test_one_env(env_name, method, folder, args: ExpConfigs, prev_rec={}):
         # print('MIN_SCORE = {:.6f}'.format(min_score))
     else:
         dist_est = None
-        min_score = 0
+        min_score = None
     # ==============================================
 
     # FCL checker =====================
@@ -619,11 +295,12 @@ def test_one_env(env_name, method, folder, args: ExpConfigs, prev_rec={}):
     fcl_checker = FCLChecker(obstacles, robot, robot_manager, obs_managers)
     # =================================
 
-    options = {
+    optim_options = {
         'N_WAYPOINTS': 20,
         'NUM_RE_TRIALS': 3,
         'MAXITER': 200,
-        'safety_margin': max(1/5*min_score, -0.5),
+        'safety_margin': 1/3*min_score if min_score is not None else None, 
+        'max_speed': 1.5,
         'seed': 1234,
         'history': False
     }
@@ -632,66 +309,130 @@ def test_one_env(env_name, method, folder, args: ExpConfigs, prev_rec={}):
         'N_WAYPOINTS': 20,
         'NUM_RE_TRIALS': 1, # just one trial
         'MAXITER': 200,
+        'max_speed': 1.5,
         'seed': 1234, # actually not used due to only one trial
         'history': False,
     }
 
-    test_rec = {
-        'start_cfg': [],
-        'target_cfg': [],
-        'cnt_check': [],
-        'repair_cnt_check': [],
-        'cost': [],
-        'repair_cost': [],
-        'time': [],
-        'val_time': [],
-        'repair_time': [],
-        'success': [],
-        'repair_success': [],
-        'seed': [],
-        'solution': [],
-        'repair_solution': [],
+    planning_options = {
+        'maxtime': 30
     }
+
+    # test_rec = {
+    #     'start_cfg': [],
+    #     'target_cfg': [],
+    #     'cnt_check': [],
+    #     'repair_cnt_check': [],
+    #     'cost': [],
+    #     'repair_cost': [],
+    #     'time': [],
+    #     'val_time': [],
+    #     'repair_time': [],
+    #     'success': [],
+    #     'repair_success': [],
+    #     'seed': [],
+    #     'solution': [],
+    #     'repair_solution': [],
+    # }
+    test_rec = {}
+
+    if args.use_planning:
+        if args.valid_checker is None:
+            raise ValueError(f'Planning is requested but no validity checker is provided: valid_checker={args.valid_checker}.')
+        elif args.valid_checker.lower() == 'fcl':
+            checker_func = lambda cfg: fcl_checker(cfg)[0].item() < 0
+        elif args.valid_checker.lower() == 'diffco':
+            checker_func = lambda cfg: dist_est(cfg)[0].item() - optim_options['safety_margin'] < 0
+        else:
+            raise NotImplementedError
+        def motion_cost_func(s1, s2):
+            p_tensor = torch.stack([s1, s2])
+            control_points = robot.fkine(p_tensor)
+            diff = (control_points[1:]-control_points[:-1]).pow(2).sum()
+            return diff.item()
+        mp = MotionPlanner(robot, checker_func, motion_cost_func)
     
     with open('{}/{}_testcfgs.json'.format(folder, env_name), 'r') as f:
         test_cfg_dataset = json.load(f)
-        s_cfgs = torch.FloatTensor(test_cfg_dataset['start_cfgs'])[:10]
-        t_cfgs = torch.FloatTensor(test_cfg_dataset['target_cfgs'])[:10]
+        s_cfgs = torch.FloatTensor(test_cfg_dataset['start_cfgs'])[:args.num_query_per_env]
+        t_cfgs = torch.FloatTensor(test_cfg_dataset['target_cfgs'])[:args.num_query_per_env]
         assert env_name == test_cfg_dataset['env_name']
-    if prev_rec != {}:
-        rec_s_cfgs = torch.FloatTensor(prev_rec['solution'])[:, 0]
-        rec_t_cfgs = torch.FloatTensor(prev_rec['solution'])[:, -1]
-        assert torch.all(torch.isclose(rec_s_cfgs, s_cfgs[:len(rec_s_cfgs)])) and torch.all(torch.isclose(rec_t_cfgs, t_cfgs[:len(rec_t_cfgs)]))
-    for test_it, (start_cfg, target_cfg) in tqdm(enumerate(zip(s_cfgs, t_cfgs)), desc='Test Query'):
-        options['seed'] += 1 # Otherwise the random initialization will stay the same every problem
-        if prev_rec != {} and test_it < len(prev_rec['success']):
+    # if prev_rec != None:
+    #     rec_s_cfgs = torch.FloatTensor([sol[0] for sol in prev_rec['solution']])[:args.num_query_per_env]
+    #     rec_t_cfgs = torch.FloatTensor([sol[-1] for sol in prev_rec['solution']])[:args.num_query_per_env] # torch.FloatTensor(prev_rec['solution'])[:, -1]
+    #     assert torch.all(torch.isclose(rec_s_cfgs, s_cfgs[:len(rec_s_cfgs)])) and torch.all(torch.isclose(rec_t_cfgs, t_cfgs[:len(rec_t_cfgs)]))
+    
+    
+    for test_it, (start_cfg, target_cfg) in tqdm(enumerate(zip(s_cfgs, t_cfgs)), total=len(s_cfgs), desc='Test Query'):
+        optim_options['seed'] += 1 # Otherwise the random initialization will stay the same every problem
+
+        if prev_rec != None and test_it < len(prev_rec['success']):
             print('using saved solution {}'.format(test_it))
-            tmp_rec = {k: prev_rec[k][test_it] for k in prev_rec}
-        elif method == 'fclgradfree':
-            print('solving query {} with fclgradfree'.format(test_it))
-            tmp_rec = gradient_free_traj_optimize(robot, lambda cfg: fcl_checker.predict(cfg, distance=False), start_cfg, target_cfg, options=options)
-        elif method == 'fcldist':
-            tmp_rec = gradient_free_traj_optimize(robot, fcl_checker.score, start_cfg, target_cfg, options=options)
-        elif method == 'adamdiffco':
-            tmp_rec = adam_traj_optimize(robot, dist_est, start_cfg, target_cfg, options=options)
-        elif method == 'bidiffco':
-            tmp_rec = gradient_free_traj_optimize(robot, lambda cfg: 2*(dist_est(cfg)>=0).type(torch.FloatTensor)-1, start_cfg, target_cfg, options=options)
-        elif method == 'diffcogradfree':
-            with torch.no_grad():
-                tmp_rec = gradient_free_traj_optimize(robot, dist_est, start_cfg, target_cfg, options=options)
-        elif method == 'margindiffcogradfree':
-            with torch.no_grad():
-                tmp_rec = gradient_free_traj_optimize(robot, lambda cfg: dist_est(cfg)-options['safety_margin'], start_cfg, target_cfg, options=options)
-        elif method == 'givengrad':
-            tmp_rec = givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options=options)
+            # tmp_rec = {k: prev_rec[k][test_it] for k in prev_rec} # this is usual case
+            tmp_rec = {k: prev_rec[k][test_it] for k in prev_rec if 'repair_' not in k} # this is temporary to ignore repair stuff
         else:
-            raise NotImplementedError('Method = {} not implemented'.format(method))
+            tmp_rec = {}
         
-        # Verification
+        # if (env_name, test_it) not in [ # Temp
+        #     ('2d_2dof_2obs_binary_02', 9),
+        #     ('2d_2dof_20obs_binary_08', 0),
+        #     ('2d_3dof_10obs_binary_06', 3),
+        #     ('2d_7dof_20obs_binary_03', 6),
+        # ]: continue
+
+        tmp_optim_options = optim_options # default to no planning solution
+        if args.use_planning:
+            if 'plan_solution' not in tmp_rec:
+                plan_rec = mp.plan(start_cfg, target_cfg, planning_options)
+                if plan_rec['solution'] != None and len(plan_rec['solution']) > optim_options['N_WAYPOINTS']:
+                    tmp_path = torch.DoubleTensor(plan_rec['solution'])
+                    original_cost = sum([motion_cost_func(tmp_path[i], tmp_path[i+1]) for i in range(len(tmp_path)-1)])
+                    print('Original path cost = ', original_cost, plan_rec['cost'])
+                    indices = torch.linspace(0, len(tmp_path)-1, optim_options['N_WAYPOINTS'], dtype=int)
+                    tmp_path = tmp_path[indices]
+                    plan_rec['cost'] = sum([motion_cost_func(tmp_path[i], tmp_path[i+1]) for i in range(len(tmp_path)-1)])
+                    plan_rec['solution'] = tmp_path.numpy().tolist()
+                    print('Path cost modified to ', plan_rec['cost'])
+                for k in plan_rec:
+                    tmp_rec['plan_'+k] = plan_rec[k]
+                    tmp_rec[k] = plan_rec[k]
+            if tmp_rec['plan_success']:
+                tmp_optim_options = {**optim_options, 'init_solution': torch.DoubleTensor(tmp_rec['plan_solution'])}
+
+        if args.use_optim:
+            if args.use_optim == 'force' or 'optim_solution' not in tmp_rec or ('optim_method' in tmp_rec and tmp_rec['optim_method'] != optim_method):
+                if optim_method == 'fclgradfree':
+                    print('solving query {} with fclgradfree'.format(test_it))
+                    optim_rec = gradient_free_traj_optimize(robot, lambda cfg: fcl_checker.predict(cfg, distance=False), start_cfg, target_cfg, options=tmp_optim_options)
+                elif optim_method == 'fcldist':
+                    optim_rec = gradient_free_traj_optimize(robot, fcl_checker.score, start_cfg, target_cfg, options=tmp_optim_options)
+                elif optim_method == 'adamdiffco':
+                    optim_rec = adam_traj_optimize(robot, dist_est, start_cfg, target_cfg, options=tmp_optim_options)
+                elif optim_method == 'bidiffco':
+                    optim_rec = gradient_free_traj_optimize(robot, lambda cfg: 2*(dist_est(cfg)>=0).type(torch.FloatTensor)-1, start_cfg, target_cfg, options=tmp_optim_options)
+                elif optim_method == 'diffcogradfree':
+                    with torch.no_grad():
+                        optim_rec = gradient_free_traj_optimize(robot, dist_est, start_cfg, target_cfg, options=tmp_optim_options)
+                elif optim_method == 'margindiffcogradfree':
+                    with torch.no_grad():
+                        optim_rec = gradient_free_traj_optimize(robot, lambda cfg: dist_est(cfg)-tmp_optim_options['safety_margin'], start_cfg, target_cfg, options=tmp_optim_options)
+                elif optim_method == 'givengrad':
+                    optim_rec = givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options=tmp_optim_options)
+                elif optim_method == 'trust-constr':
+                    optim_rec = trustconstr_traj_optimize(robot, dist_est, start_cfg, target_cfg, options=tmp_optim_options)
+                else:
+                    raise NotImplementedError('Method = {} not implemented'.format(optim_method))
+                
+                for k in optim_rec:
+                    tmp_rec['optim_'+k] = optim_rec[k]
+                    tmp_rec[k] = optim_rec[k]
+                tmp_rec['optim_method'] = optim_method
+        
+        ### ============= Verification ======================
         # if tmp_rec['success']:
         def con_max_move(p):
             control_points = robot.fkine(p)
-            return torch.all((control_points[1:]-control_points[:-1]).pow(2).sum(dim=2)-1.5**2 <= 0).item()
+            return torch.all((control_points[1:]-control_points[:-1]).pow(2).sum(dim=2)-optim_options['max_speed']**2 <= 0).item()
         def con_collision_free(p):
             return torch.all(fcl_checker.predict(p, distance=False) < 0).item()
         def con_dist_collision_free(p):
@@ -701,6 +442,8 @@ def test_one_env(env_name, method, folder, args: ExpConfigs, prev_rec={}):
             return (torch.all(robot.limits[:, 0]-p <= 0) and torch.all(p-robot.limits[:, 1] <= 0)).item()
 
         def validate(solution, method=None):
+            if solution is None:
+                return False
             veri_cfgs = [utils.anglin(q1, q2, args.validate_density, endpoint=False)\
                 for q1, q2 in zip(solution[:-1], solution[1:])]
             veri_cfgs = torch.cat(veri_cfgs, 0)
@@ -710,59 +453,95 @@ def test_one_env(env_name, method, folder, args: ExpConfigs, prev_rec={}):
             within_movelimit = con_max_move(sol_tensor)
             return collision_free and within_jointlimit and within_movelimit
         
-        if 'fcl' in method and args.validate_density == 1: # skip validation if using fcl and density is only 1
+        if args.use_planning and not args.use_optim:
+            solution_to_validate = tmp_rec['plan_solution']
+            tmp_success = tmp_rec['plan_success']
+            need_validate = 'fcl' not in args.valid_checker.lower() or args.validate_density > 1
+            print('Validating a planning solution...')
+        elif args.use_optim:
+            solution_to_validate = tmp_rec['optim_solution']
+            tmp_success = tmp_rec['optim_success']
+            need_validate = 'fcl' not in optim_method.lower() or args.validate_density > 1
+            print('Validating a optimization solution...')
+        if not need_validate: # skip validation if using fcl and density is only 1
             val_t = 0
             # tmp_rec['success'] = validate(tmp_rec['solution'], method=method) # This is only temporary
         else:
             val_t = time()
-            tmp_rec['success'] = validate(tmp_rec['solution'])
+            tmp_success = validate(solution_to_validate)
             val_t = time() - val_t
         tmp_rec['val_time'] = val_t
-
-        for k in tmp_rec:
-            if 'repair_' in k:
-                continue
-            test_rec[k].append(tmp_rec[k])
+        tmp_rec['success'] = tmp_success
         
-        # Repair
-        if not tmp_rec['success'] and 'fcl' not in method:
-            repair_rec = gradient_free_traj_optimize(robot, fcl_checker.score, start_cfg, target_cfg, 
-                options={**repair_options, 'init_solution': torch.DoubleTensor(tmp_rec['solution'])})
-            # repair_rec['success'] = validate(repair_rec['solution']) # validation not needed
-        else:
-            repair_rec = {
-                'cnt_check': 0,
-                'cost': tmp_rec['cost'],
-                'time': 0,
-                'success': tmp_rec['success'],
-                'solution': tmp_rec['solution'],
-            }
-        for k in ['cnt_check', 'cost', 'time', 'success', 'solution']:
-            test_rec['repair_'+k].append(repair_rec[k])
+        ### =============== Repair ========================
+        if args.use_repair:
+            if not tmp_rec['success'] and 'fcl' not in optim_method:
+                repair_rec = gradient_free_traj_optimize(robot, fcl_checker.score, start_cfg, target_cfg, 
+                    options={**repair_options, 'init_solution': torch.DoubleTensor(tmp_rec['solution'])})
+                # repair_rec['success'] = validate(repair_rec['solution']) # validation not needed
+            else:
+                repair_rec = {
+                    'cnt_check': 0,
+                    'cost': tmp_rec['cost'],
+                    'time': 0,
+                    'success': tmp_rec['success'],
+                    'solution': tmp_rec['solution'],
+                }
+            if args.validate_density > 1:
+                val_t = time()
+                repair_rec['success'] = validate(repair_rec['solution'])
+                val_t = time() - val_t
+                tmp_rec['val_time'] += val_t
+            for k in repair_rec:
+                tmp_rec['repair_'+k] = repair_rec[k]
+                tmp_rec[k] = repair_rec[k]
+
+        # for k in tmp_rec:
+        #     if k not in test_rec:
+        #         test_rec[k] = []
+        #     test_rec[k].append(tmp_rec[k])
+        #     assert len(test_rec[k]) == test_it+1
+        for k in set(list(tmp_rec.keys())+list(test_rec.keys())):
+            if k not in test_rec:
+                test_rec[k] = [None] * test_it
+            if k in tmp_rec:
+                test_rec[k].append(tmp_rec[k])
+            else:
+                test_rec[k].append(None)
+            assert len(test_rec[k]) == test_it+1
+            
         
         # ================Visualize for debugging purposes===================
-        # cfg_path_plots = []
-        # if robot.dof > 2:
-        #     fig, ax, link_plot, joint_plot, eff_plot = create_plots(robot, obstacles, dist_est, checker)
-        # elif robot.dof == 2:
-        #     fig, ax, link_plot, joint_plot, eff_plot, cfg_path_plots = create_plots(robot, obstacles, dist_est, checker)
-        # single_plot(robot, torch.FloatTensor(test_rec['repair_solution'][-1]), fig, link_plot, joint_plot, eff_plot, cfg_path_plots=cfg_path_plots, ax=ax)
-        # debug_dir = join('debug', exp_name, method)
-        # if not isdir(debug_dir):
-        #     os.makedirs(debug_dir)
-        # plt.savefig(join(debug_dir, 'debug_view_{}.png'.format(test_it)), dpi=500)
-        # plt.close()
-
-        # break # debugging
+        if args.debug_plot_interval > 0 and test_it % args.debug_plot_interval == 0:
+            cfg_path_plots = []
+            if robot.dof > 2:# or True: # TEMP
+                fig, ax, link_plot, joint_plot, eff_plot = create_plots(robot, obstacles, dist_est, checker)
+            elif robot.dof == 2:
+                fig, ax, link_plot, joint_plot, eff_plot, cfg_path_plots = create_plots(robot, obstacles, dist_est, checker)
+            if test_rec['solution'][-1] != None:
+                single_plot(robot, torch.FloatTensor(test_rec['solution'][test_it][::4] if robot.dof == 7 else test_rec['solution'][test_it]), fig, link_plot, joint_plot, eff_plot, cfg_path_plots=cfg_path_plots, ax=ax)
+            else:
+                single_plot(robot, torch.stack([start_cfg, target_cfg]), fig, link_plot, joint_plot, eff_plot, cfg_path_plots=cfg_path_plots, ax=ax)
+            if res_folder is not None:
+                debug_dir = join(res_folder, 'debug', env_name, optim_method)
+            else:
+                debug_dir = join('debug', env_name, optim_method)
+            if not isdir(debug_dir):
+                os.makedirs(debug_dir)
+            plt.title('Success {}, Cost {:.3f}'.format(tmp_rec['success'], tmp_rec['cost']))
+            plt.savefig(join(debug_dir, 'debug_view_{}.png'.format(test_it)), dpi=500)
+            plt.close()
+            # break # debugging
 
     return test_rec
 
-def main(method, exp_name, override=False, args=None):
+def main(optim_method, exp_name, res_folder=None, override=False, args: ExpConfigs=None):
     if args.load_exp is not None:
         print('Loading experiment results from {}'.format(args.load_exp))
-    data_folder = join('data', exp_name if args.load_exp is None else args.load_exp)
-    res_folder = join('results', exp_name)
+    data_folder = join('data', exp_name) # if args.load_exp is None else args.load_exp)
+    res_folder = join('results', exp_name if res_folder is None else res_folder)
     restored_res_folder = res_folder if args.load_exp is None else join('results', args.load_exp)
+    load_key_in_json = args.load_key_in_json if args.load_key_in_json is not None else optim_method
     if not isdir(res_folder):
         os.makedirs(res_folder)
     elif not override:
@@ -780,20 +559,27 @@ def main(method, exp_name, override=False, args=None):
 
     for env_name in tqdm(envs):
         env_name = splitext(basename(env_name))[0]
+        # if env_name not in ['2d_2dof_2obs_binary_02', '2d_3dof_10obs_binary_06', '2d_7dof_20obs_binary_03', '2d_2dof_20obs_binary_08']: # Temp
+        #     continue
+        if args.num_obs != None and not any([f'{n}obs' in env_name for n in args.num_obs]):
+            print(f'WARNING: Skipping {env_name} because it does not have the required number of obstacles: {args.num_obs}')
+            continue # Skipping the environments not containing the requested number of obs.
 
+        # Load previously stored results. This is to enable experiment resuming.
         restore_rec_file = os.path.join(restored_res_folder, env_name+'.json')
         if os.path.isfile(restore_rec_file):
             with open(restore_rec_file, 'r') as f:
-                all_rec = json.load(f)
-            if method in all_rec and args.load_exp is None:
+                env_all_rec = json.load(f)
+            if optim_method in env_all_rec and args.load_exp is None:
+                print(f'WARNING: Skipping {env_name}, {optim_method} because it\'s done.')
                 continue
-            elif hasattr(args, 'only_repair') and args.only_repair and method in all_rec and 'repair_success' in all_rec[method]:
-                assert method in all_rec and all_rec[method] != {}
+            elif args.only_repair and optim_method in env_all_rec and 'repair_success' in env_all_rec[optim_method]:
+                assert optim_method in env_all_rec and env_all_rec[optim_method] != {}
                 continue
-        else:
+        else: 
             assert args.load_exp is None, \
                 'Trying to load experiment {}, but the result file {} does not exist'.format(args.load_exp, restore_rec_file)
-            all_rec = {}
+            env_all_rec = {}
         
         # if all_rec != {}:
         #     print('Env {} missing Method {}, redoing now...'.format(env_name, method))
@@ -802,12 +588,14 @@ def main(method, exp_name, override=False, args=None):
         #     # This is just temporary!!
         #     print('Skipping {}, {}'.format(env_name, method))
         #     continue
-        test_rec = test_one_env(env_name, method=method, folder=data_folder, args=args, prev_rec=all_rec[method] if args.load_exp != None else {})
+        test_rec = test_one_env(env_name, optim_method=optim_method, folder=data_folder, args=args, 
+            prev_rec=env_all_rec[load_key_in_json] if args.load_exp != None else None, res_folder=res_folder)
         
         rec_file = os.path.join(res_folder, env_name+'.json')
-        all_rec[method] = test_rec
+        env_all_rec[optim_method] = test_rec
         with open(rec_file, 'w') as f:
-            json.dump(all_rec, f, indent=4)
+            json.dump(env_all_rec, f, indent=4)
+            print(f'WARNING: Records written to {rec_file}')
 
 def additional_timing(method, exp_name):
     folder = join('data', exp_name)
@@ -822,7 +610,7 @@ def additional_timing(method, exp_name):
             if not '_{}obs_'.format(obsn) in env_name:
                 continue
             env_name = splitext(basename(env_name))[0]
-            t = test_one_env(env_name, method=method, folder=folder)
+            t = test_one_env(env_name, optim_method=method, folder=folder)
             train_ts[obsn].append(t)
     print('{}, {}:'.format(m, exp_name))
     for obsn in [1,2,5,10,20]:
@@ -830,34 +618,49 @@ def additional_timing(method, exp_name):
         print('{} train times: {} mean {} std {} '.format(obsn, ts, ts.mean(), ts.std()))
     return train_ts
 
-
-
 if __name__ == "__main__":
-    # exps contain the names of the data directories
-    exps = ['2d_2dof_exp4', '2d_3dof_exp4', '2d_7dof_exp4']
+    # the names of the data and the result directories
+    # Both should be the sub-directory names under 'data', 'result', respectively
+    env_and_queries = ['2d_3dof_exp4'] # '2d_7dof_exp4', '2d_3dof_exp4', '2d_2dof_exp4', 
+    res_folders = ['2d_plan_test17',] # '2d_7dof_plan_test1', '2d_3dof_plan_test1', '2d_2dof_plan_test1', 
 
     # load_exps contain the names of the result directories you want to re-compute.
     # set to a list of None's when running new experiments
-    load_exps = [None, None, None]
-    methods = ['givengrad', 'margindiffcogradfree', 'fcldist'] # ['fclgradfree', 'fcldist', 'margindiffcogradfree', 'adamdiffco', 'bidiffco', 'diffcogradfree']
+    # load_exps = ['2d_plan_test16']*3 # ['2d_plan_test7',] # [None] # ['2d_planopt_test5'] #, None, None]
+    load_exps = [None]*3
+
+
+    methods = ['adamdiffco',] # ['trust-constr', 'fclgradfree', 'fcldist', 'margindiffcogradfree', 'adamdiffco', 'bidiffco', 'diffcogradfree']
+    valid_checkers = [None] # ['diffco', 'fcl'] # valid checker for the planner
     res = {}
-    for exp_name, loadexp in tqdm(list(zip(exps, load_exps))):
-        assert loadexp == None or loadexp == exp_name
-        res[exp_name] = {}
-        for m in methods:
-            st = time()
-            args = dict(
-                load_exp=loadexp,
-                include_validate_time=True,
-                use_previous_solution=False, # Set this to False unless you want to load previous solutions
-                validate_density=1, #1 means only check on waypoints. >=2 means also check some intermediate points between waypoints
-                only_repair=False, # This is only to add repair for several previous experiments. Set to False
-            )
-            args=ExpConfigs(args)
-            main(m, exp_name, override=False, args=args) # this is the main experiment. Set override=True when filling results in the same directory
-            # res[exp_name][m] = additional_timing(m, exp_name) # This is for additional timing on initial training
-            et = time()
-            print('Method {}, Exp {}, time = {:.3f} secs'.format(m, exp_name, et-st))
+    for (eq, res_folder, loadexp), (m, checker) in tqdm(list(product(
+        zip(env_and_queries, res_folders, load_exps),
+        zip(methods, valid_checkers)
+    )),  desc='Experiments progress'):
+        assert loadexp == None or loadexp == res_folder # so you better make a copy of an existing result folder and modify it, if you want to load any experiment
+        res[eq] = {}
+        # for m in methods:
+        st = time()
+        args = dict(
+            load_exp=loadexp,
+            include_validate_time=True,
+            use_previous_solution=False, # Set this to False unless you want to load previous solutions
+            validate_density=1, #1 means only check on waypoints. >=2 means also check some intermediate points between waypoints
+            only_repair=False, # This is only to add repair for several previous experiments. Set to False
+            use_planning=False, 
+            use_repair=False,
+            use_optim=True, # 'force' meaning rewrite the saved solution
+            valid_checker=checker, # validity checker for planning, not for verification; verification always uses FCL
+            num_query_per_env=2, 
+            num_obs=None, 
+            debug_plot_interval=3, # 0 means no debugging plots
+            # load_key_in_json='fcldist'
+        )
+        args=ExpConfigs(args)
+        main(m, eq, res_folder=res_folder, override=True, args=args) # this is the main experiment. Set override=True when filling results in the same directory
+        # # res[exp_name][m] = additional_timing(m, exp_name) # This is for additional timing on initial training
+        et = time()
+        print('Method {}, Exp {}, time = {:.3f} secs'.format(m, eq, et-st))
 
     # This is to print out additional timings
     # for exp_name in exps:

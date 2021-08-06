@@ -46,13 +46,17 @@ if __name__ == "__main__":
             ('circle', (-2, 3), 1), #1rect_1circle_7d
             ('rect', (3, 2), (2, 2)) #1rect_1circle_7d
         ],
-        # ('rect', (5, 0), (2, 2), 0), #2class_1
-        # ('circle', (-3, 6), 1, 1), #2class_1
-        # ('rect', (-5, 2), (2, 1.5), 1), #2class_1
-        # ('circle', (-5, -2), 1.5, 1), #2class_1 
-        # ('circle', (-3, -6), 1, 1) #2class_1
-        # ('rect', (0, 3), (16, 0.5), 1), #2class_2
-        # ('rect', (0, -3), (16, 0.5), 0), #2class_2
+        '2class_1': [
+            ('rect', (5, 0), (2, 2), 0), #2class_1
+            ('circle', (-3, 6), 1, 1), #2class_1
+            ('rect', (-5, 2), (2, 1.5), 1), #2class_1
+            ('circle', (-5, -2), 1.5, 1), #2class_1 
+            ('circle', (-3, -6), 1, 1) #2class_1
+        ],
+        '2class_2': [
+            ('rect', (0, 3), (16, 0.5), 1), #2class_2
+            ('rect', (0, -3), (16, 0.5), 0), #2class_2
+        ],
         # ('rect', (-7, 3), (2, 2)) #1rect_active
         '3circle_7d': [
             ('circle', (-2, 2), 1), #3circle_7d

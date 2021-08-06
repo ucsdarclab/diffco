@@ -18,6 +18,8 @@ class FCLChecker(CollisionChecker):
         self.num_class = len(obs_managers)
     
     def predict(self, X, distance=True):
+        if X.ndim == 1:
+            X = X[None, :]
         labels = torch.FloatTensor(len(X), len(self.obs_managers))
         dists = torch.FloatTensor(len(X), len(self.obs_managers)) if distance else None
         req = fcl.CollisionRequest(num_max_contacts=1000 if distance else 1, enable_contact=distance)

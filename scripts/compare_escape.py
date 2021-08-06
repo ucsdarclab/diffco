@@ -1,170 +1,21 @@
-import sys
+
+import os
 import json
-from diffco import DiffCo, MultiDiffCo
-from diffco import kernel
-from matplotlib import pyplot as plt
+
 import numpy as np
 import torch
-from diffco.model import RevolutePlanarRobot
-import fcl
-from scipy import ndimage
-from matplotlib import animation
+
+from diffco import DiffCo, MultiDiffCo
+from diffco import kernel
+from diffco import utils
+
+from matplotlib import pyplot as plt
 from matplotlib.patches import Rectangle, FancyBboxPatch, Circle
 import seaborn as sns
 sns.set()
 import matplotlib.patheffects as path_effects
-from diffco import utils
-from diffco.Obstacles import FCLObstacle
 
-def traj_optimize(robot, dist_est, start_cfg, target_cfg, history=False):
-    # There is a slightly different version in speed_compare.py,
-    # which allows using SLSQP instead of Adam, allows
-    # inputting an initial solution other than straight line,
-    # and is better modularly written.
-    # That one with SLSQP is more recommended to use.
-    N_WAYPOINTS = 20
-    NUM_RE_TRIALS = 10
-    UPDATE_STEPS = 200
-    dif_weight = 1
-    max_move_weight = 10
-    collision_weight = 10
-    safety_margin = torch.FloatTensor([-12, -1.2])#([-8.0, -0.8]) #
-    lr = 5e-1
-    seed = 19961221
-    torch.manual_seed(seed)
-
-    lowest_cost_solution = None
-    lowest_cost = np.inf
-    lowest_cost_trial = None
-    lowest_cost_step = None
-    best_valid_solution = None
-    best_valid_cost = np.inf
-    best_valid_step = None
-    best_valid_trial = None
-    
-    trial_histories = []
-
-    found = False
-    for trial_time in range(NUM_RE_TRIALS):
-        path_history = []
-        if trial_time == 0:
-            init_path = torch.from_numpy(np.linspace(start_cfg, target_cfg, num=N_WAYPOINTS))
-        else:
-            init_path = (torch.rand(N_WAYPOINTS, robot.dof))*np.pi*2-np.pi
-        init_path[0] = start_cfg
-        init_path[-1] = target_cfg
-        p = init_path.requires_grad_(True)
-        opt = torch.optim.Adam([p], lr=lr)
-
-        for step in range(UPDATE_STEPS):
-            opt.zero_grad()
-            collision_score = torch.clamp(dist_est(p)-safety_margin, min=0).sum()
-            control_points = robot.fkine(p)
-            max_move_cost = torch.clamp((control_points[1:]-control_points[:-1]).pow(2).sum(dim=2)-0.3**2, min=0).sum()
-            diff = (control_points[1:]-control_points[:-1]).pow(2).sum()
-            constraint_loss = collision_weight * collision_score + max_move_weight * max_move_cost
-            objective_loss = dif_weight * diff
-            loss = objective_loss + constraint_loss
-            loss.backward()
-            p.grad[[0, -1]] = 0.0
-            opt.step()
-            p.data = utils.wrap2pi(p.data)
-            if history:
-                path_history.append(p.data.clone())
-            if loss.data.numpy() < lowest_cost:
-                lowest_cost = loss.data.numpy()
-                lowest_cost_solution = p.data.clone()
-                lowest_cost_step = step
-                lowest_cost_trial = trial_time
-            if constraint_loss <= 1e-2:
-                if objective_loss.data.numpy() < best_valid_cost:
-                    best_valid_cost = objective_loss.data.numpy()
-                    best_valid_solution = p.data.clone()
-                    best_valid_step = step
-                    best_valid_trial = trial_time
-            if constraint_loss <= 1e-2 or step % (UPDATE_STEPS/5) == 0 or step == UPDATE_STEPS-1:
-                print('Trial {}: Step {}, collision={:.3f}*{:.1f}, max_move={:.3f}*{:.1f}, diff={:.3f}*{:.1f}, Loss={:.3f}'.format(
-                    trial_time, step, 
-                    collision_score.item(), collision_weight,
-                    max_move_cost.item(), max_move_weight,
-                    diff.item(), dif_weight,
-                    loss.item()))
-        trial_histories.append(path_history)
-        
-        if best_valid_solution is not None:
-            found = True
-            break
-    if not found:
-        print('Did not find a valid solution after {} trials!\
-            Giving the lowest cost solution'.format(NUM_RE_TRIALS))
-        solution = lowest_cost_solution
-        solution_step = lowest_cost_step
-        solution_trial = lowest_cost_trial
-    else:
-        solution = best_valid_solution
-        solution_step = best_valid_step
-        solution_trial = best_valid_trial
-    path_history = trial_histories[solution_trial] # Could be empty when history = false
-    if not path_history:
-        path_history.append(solution)
-    else:
-        path_history = path_history[:(solution_step+1)]
-    return solution, path_history, solution_trial, solution_step
-
-def animation_demo(robot, p, fig, link_plot, joint_plot, eff_plot, cfg_path_plots=None, path_history=None, save_dir=None):
-    global opt, start_frame, cnt_down
-    FPS = 15
-
-    def init():
-        if robot.dof == 2:
-            return [link_plot, joint_plot, eff_plot] + cfg_path_plots
-        else:
-            return link_plot, joint_plot, eff_plot
-
-    def update_traj(i):
-        if robot.dof == 2:
-            for cfg_path in cfg_path_plots:
-                cfg_path.set_data(path_history[i][:, 0], path_history[i][:, 1])
-            return cfg_path_plots
-        else:
-            return link_plot, joint_plot, eff_plot
-        
-    def plot_robot(q):
-        robot_points = robot.fkine(q)[0]
-        robot_points = torch.cat([torch.zeros(1, 2), robot_points])
-        link_plot.set_data(robot_points[:, 0], robot_points[:, 1])
-        joint_plot.set_data(robot_points[:-1, 0], robot_points[:-1, 1])
-        eff_plot.set_data(robot_points[-1:, 0], robot_points[-1:, 1])
-
-        return link_plot, joint_plot, eff_plot
-
-    def move_robot(i):
-        i = i if i < len(p) else len(p)-1
-        with torch.no_grad():
-            ret = plot_robot(p[i])
-        if robot.dof == 2:
-            return list(ret) + cfg_path_plots
-        else:
-            return ret
-
-    if robot.dof == 2 and path_history:
-        UPDATE_STEPS = len(path_history)
-        f = lambda i: update_traj(i) if i < UPDATE_STEPS else move_robot(i-UPDATE_STEPS)
-        num_frames = UPDATE_STEPS + len(p)
-    else:
-        f = move_robot
-        num_frames=len(p)
-    ani = animation.FuncAnimation(
-        fig, func=f, 
-        frames=num_frames, interval=1000./FPS, 
-        blit=True, init_func=init, repeat=False)
-    
-    if save_dir:
-        ani.save(save_dir, fps=FPS)
-    else:
-        # plt.axis('equal')
-        # plt.axis('tight')
-        plt.show()
+from escape import *
 
 # A function that controls the style of visualization.
 def create_plots(robot, obstacles, dist_est, checker):
@@ -265,13 +116,13 @@ def single_plot(robot, p, fig, link_plot, joint_plot, eff_plot, cfg_path_plots=N
     
     lw = link_plot.get_lw()
     link_traj = [ax.plot(points[:, 0], points[:, 1], color='gray', alpha=traj_alpha, lw=lw, solid_capstyle='round')[0] for points in points_traj]
-    joint_traj = [ax.plot(points[:-1, 0], points[:-1, 1], 'o', color='tab:red', alpha=traj_alpha, markersize=lw)[0] for points in points_traj]
+    # joint_traj = [ax.plot(points[:-1, 0], points[:-1, 1], 'o', color='tab:red', alpha=traj_alpha, markersize=lw)[0] for points in points_traj]
     eff_traj = [ax.plot(points[-1:, 0], points[-1:, 1], 'o', color='black', alpha=traj_alpha, markersize=lw)[0] for points in points_traj]
 
     for i in [0, -1]:
         link_traj[i].set_alpha(ends_alpha)
         link_traj[i].set_path_effects([path_effects.SimpleLineShadow(), path_effects.Normal()])
-        joint_traj[i].set_alpha(ends_alpha)
+        # joint_traj[i].set_alpha(ends_alpha)
         eff_traj[i].set_alpha(ends_alpha)
     link_traj[0].set_color('green')
     link_traj[-1].set_color('orange')
@@ -307,39 +158,15 @@ def single_plot(robot, p, fig, link_plot, joint_plot, eff_plot, cfg_path_plots=N
     #         cfg_path.axes.plot(seg[:, 0], seg[:, 1], '-o', c='olivedrab', alpha=0.5, markersize=3)
     # ---------------------------------------------
 
-def escape(robot, dist_est, start_cfg):
-    N_WAYPOINTS = 20
-    UPDATE_STEPS = 200
-    safety_margin = -0.3
-    lr = 5e-2
-    path_history = []
-    init_path = start_cfg
-    p = init_path.requires_grad_(True)
-    opt = torch.optim.Adam([p], lr=lr)
-
-    for step in range(N_WAYPOINTS):
-        if step % 1 == 0:
-            path_history.append(p.data.clone())
-
-        opt.zero_grad()
-        collision_score = dist_est(p)-safety_margin
-        loss = collision_score
-        loss.backward()
-        opt.step()
-        p.data = utils.wrap2pi(p.data)
-        if collision_score <= 1e-4:
-            break
-    return torch.stack(path_history, dim=0)
-
 # Commented out lines include convenient code for debugging purposes
-def main():
-    DOF = 2
-    env_name = '2instance'
+def main(env_name, DOF, total_num_cfgs, key=None):
+    # DOF = 2
+    # env_name = # '2instance'
 
     dataset = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name))
-    cfgs = dataset['data']
-    labels = dataset['label']
-    dists = dataset['dist']
+    cfgs = dataset['data'].double()
+    labels = dataset['label'].double()
+    dists = dataset['dist'].double()
     obstacles = dataset['obs']
     obstacles = [obs+(i, ) for i, obs in enumerate(obstacles)]
     print(obstacles)
@@ -347,8 +174,11 @@ def main():
     width = robot.link_width
     train_num = 6000
     fkine = robot.fkine
-    # checker = DiffCo(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
-    checker = MultiDiffCo(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
+
+    if key is not None:
+        env_name = f'{env_name}_{key}'
+    checker = DiffCo(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
+    # checker = MultiDiffCo(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
     checker.train(cfgs[:train_num], labels[:train_num], max_iteration=len(cfgs[:train_num]), distance=dists[:train_num])
 
     # Check DiffCo test ACC
@@ -363,7 +193,8 @@ def main():
     Epsilon = 1 #0.01
     checker.fit_poly(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine)#, reg=0.09) # epsilon=Epsilon,
     dist_est = checker.rbf_score
-    print('MIN_SCORE = {:.6f}'.format(dist_est(cfgs[train_num:]).min()))
+    min_score = dist_est(cfgs[train_num:]).min().item()
+    print('MIN_SCORE = {:.6f}'.format(min_score))
 
     # return # DEBUGGING
 
@@ -373,45 +204,36 @@ def main():
     elif robot.dof == 2:
         fig, ax, link_plot, joint_plot, eff_plot, cfg_path_plots = create_plots(robot, obstacles, dist_est, checker)
 
-    
 
-    # Begin optimization
-    # free_cfgs = cfgs[labels == -1]
-    # indices = torch.randint(0, len(free_cfgs), (2, ))
-    # while indices[0] == indices[1]:
-    #     indices = torch.randint(0, len(free_cfgs), (2, ))
-    start_cfg = torch.zeros(robot.dof, dtype=torch.float32) # free_cfgs[indices[0]] # 
-    target_cfg = torch.zeros(robot.dof, dtype=torch.float32) # free_cfgs[indices[1]] # 
-    start_cfg[0] = -np.pi/4 #np.pi/2 #-np.pi/16 #  # #  #0 # # # 
-    # start_cfg[1] = -np.pi/6
-    target_cfg[0] = 3*np.pi/4 #-np.pi/2 # -15*np.pi/16 #  # #  #np.pi# # # 
-    # target_cfg[1] = np.pi/5
+    path_dir = 'results/escape'
+    os.makedirs(path_dir, exist_ok=True)
 
-    ## This is for doing traj optimization
-    p, path_history, num_trial, num_step = traj_optimize(
-        robot, dist_est, start_cfg, target_cfg, history=True)
-    with open('results/path_2d_{}dof_{}.json'.format(robot.dof, env_name), 'w') as f:
-        json.dump(
-            {
-                'path': p.data.numpy().tolist(), 
-                'path_history': [tmp.data.numpy().tolist() for tmp in path_history],
-                'trial': num_trial,
-                'step': num_step
-            },
-            f, indent=1)
+    optim_esc_options = {
+        'N_WAYPOINTS': 20,
+        'safety_margin': min_score/5,
+        'lr': 5e-2,
+        'record_freq': None, # only last configuration
+        'post_transform': utils.wrap2pi,
+        'optimizer': torch.optim.Adam
+    }
+
+    cnt_valid = 0
+    while cnt_valid < total_num_cfgs:
+        cfg = resampling_escape(robot)
+        cfg = optim_escape(robot, dist_est, cfg, optim_esc_options)
+        # if fcl_checker(cfg):
+
+
+    pathname = os.path.join(path_dir, 'esc_2d_{}dof_{}.json'.format(robot.dof, env_name))
+    with open(pathname, 'w') as f:
+        json.dump({'path': p.data.numpy().tolist(), },f, indent=1)
         print('Plan recorded in {}'.format(f.name))
 
-    ## This for doing the escaping-from-collision experiment
-    # p = escape(robot, dist_est, start_cfg)
-    # with open('results/esc_2d_{}dof_{}.json'.format(robot.dof, env_name), 'w') as f:
-    #     json.dump({'path': p.data.numpy().tolist(), },f, indent=1)
-    #     print('Plan recorded in {}'.format(f.name))
-
     ## This is for loading previously computed trajectory
-    # with open('results/path_2d_{}dof_{}.json'.format(robot.dof, env_name), 'r') as f:
-    #     path_dict = json.load(f)
-    #     p = torch.FloatTensor(path_dict['path'])
-    #     path_history = [torch.FloatTensor(shot) for shot in path_dict['path_history']] #[p] #
+    with open(pathname, 'r') as f:
+        optim_rec = json.load(f)
+        # p = torch.FloatTensor(path_dict['solution'])
+        # path_history = [torch.FloatTensor(shot) for shot in path_dict['path_history']] #[p] #
     
     ## This produces an animation for the trajectory
     # vid_name = None #'results/maual_trajopt_2d_{}dof_{}_fitting_{}_eps_{}_dif_{}_updates_{}_steps_{}.mp4'.format(
@@ -424,13 +246,16 @@ def main():
     #     animation_demo(robot, p, fig, link_plot, joint_plot, eff_plot, save_dir=vid_name)
 
     # (Recommended) This produces a single shot of the planned trajectory
-    single_plot(robot, p, fig, link_plot, joint_plot, eff_plot, cfg_path_plots=cfg_path_plots, ax=ax)
-    # plt.show()
-    # plt.savefig('figs/path_2d_{}dof_{}.png'.format(robot.dof, env_name), dpi=500)
-    # plt.savefig('figs/2d_{}dof_{}_equalmargin'.format(robot.dof, env_name), dpi=500) #_equalmargin.png
-
+    optim_rec['solution'] = optim_rec['solution'][0:1] + optim_rec['solution'][1:-2:2]+optim_rec['solution'][-2:]
+    single_plot(robot, torch.FloatTensor(optim_rec['solution']), fig, link_plot, joint_plot, eff_plot, cfg_path_plots=cfg_path_plots, ax=ax)
     plt.tight_layout()
-    plt.savefig('figs/opening_contourline.png', dpi=500, bbox_inches='tight')
+    fig_dir = 'figs/safetybias'
+    os.makedirs(fig_dir, exist_ok=True)
+    # plt.show()
+    plt.savefig(os.path.join(fig_dir, '_new_2d_{}dof_{}.png'.format(robot.dof, env_name)), dpi=500)
+    # plt.savefig(os.path.join(fig_dir, '_new_2d_{}dof_{}_equalmargin'.format(robot.dof, env_name)), dpi=500) #_equalmargin.png
+
+    # plt.savefig('figs/opening_contourline.png', dpi=500, bbox_inches='tight')
     
     
 
@@ -438,4 +263,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main('2class_2', 7, key=None) #'equalmargin'
+    # main('2class_1', 3, key='equalmargin')
