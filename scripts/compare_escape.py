@@ -1,6 +1,8 @@
 
 import os
 import json
+from time import time
+from tqdm import tqdm
 
 import numpy as np
 import torch
@@ -8,6 +10,7 @@ import torch
 from diffco import DiffCo, MultiDiffCo
 from diffco import kernel
 from diffco import utils
+from diffco import FCLChecker
 
 from matplotlib import pyplot as plt
 from matplotlib.patches import Rectangle, FancyBboxPatch, Circle
@@ -87,11 +90,12 @@ def create_plots(robot, obstacles, dist_est, checker):
     ax.tick_params(labelsize=18)
     for obs in obstacles:
         cat = obs[3] if len(obs) >= 4 else 1
-        print('{}, cat {}, {}'.format(obs[0], cat, obs))
+        # print('{}, cat {}, {}'.format(obs[0], cat, obs))
         if obs[0] == 'circle':
-            ax.add_patch(Circle(obs[1], obs[2], path_effects=[path_effects.withSimplePatchShadow()], color=cmaps[cat](0.5)))
+            ax.add_patch(Circle(obs[1], obs[2], #path_effects=[path_effects.withSimplePatchShadow()],
+             color=cmaps[cat](0.5)))
         elif obs[0] == 'rect':
-            ax.add_patch(Rectangle((obs[1][0]-float(obs[2][0])/2, obs[1][1]-float(obs[2][1])/2), obs[2][0], obs[2][1], path_effects=[path_effects.withSimplePatchShadow()], 
+            ax.add_patch(Rectangle((obs[1][0]-float(obs[2][0])/2, obs[1][1]-float(obs[2][1])/2), obs[2][0], obs[2][1], #path_effects=[path_effects.withSimplePatchShadow()], 
             color=cmaps[cat](0.5)))
     
     # Placeholder of the robot plot
@@ -121,60 +125,25 @@ def single_plot(robot, p, fig, link_plot, joint_plot, eff_plot, cfg_path_plots=N
 
     for i in [0, -1]:
         link_traj[i].set_alpha(ends_alpha)
-        link_traj[i].set_path_effects([path_effects.SimpleLineShadow(), path_effects.Normal()])
+        # link_traj[i].set_path_effects([path_effects.SimpleLineShadow(), path_effects.Normal()])
         # joint_traj[i].set_alpha(ends_alpha)
         eff_traj[i].set_alpha(ends_alpha)
-    link_traj[0].set_color('green')
-    link_traj[-1].set_color('orange')
-
-    # def divide(p): # divide the path into several segments that obeys the wrapping around rule [TODO]
-    #     diff = torch.abs(p[:-1]-p[1:])
-    #     div_idx = torch.where(diff.max(1) > np.pi)
-    #     div_idx = torch.cat([-1, div_idx])
-    #     segments = []
-    #     for i in range(len(div_idx)-1):
-    #         segments.append(p[div_idx[i]+1:div_idx[i+1]+1])
-    #     segments.append(p[div_idx[-1]+1:])
-    #     for i in range(len(segments)-1):
-    #         if torch.sum(torch.abs(segments[i]) > np.pi) == 2:
-
-
-    # for cfg_path in cfg_path_plots:
-    #     cfg_path.set_data(p[:, 0], p[:, 1])
-
-    # ---------Just for making the opening figure------------
-    # For a better way wrap around trajectories in angular space
-    # see active.py
-
-    # segments = [p[:-3], p[-3:]]
-    # d1 = segments[0][-1, 0]-(-np.pi)
-    # d2 = np.pi - segments[1][0, 0]
-    # dh = segments[1][0, 1] - segments[0][-1, 1]
-    # intery = segments[0][-1, 1] + dh/(d1+d2)*d1
-    # segments[0] = torch.cat([segments[0], torch.FloatTensor([[-np.pi, intery]])])
-    # segments[1] = torch.cat([torch.FloatTensor([[np.pi, intery]]), segments[1]])
-    # for cfg_path in cfg_path_plots:
-    #     for seg in segments:
-    #         cfg_path.axes.plot(seg[:, 0], seg[:, 1], '-o', c='olivedrab', alpha=0.5, markersize=3)
-    # ---------------------------------------------
+    # link_traj[0].set_color('green')
+    # link_traj[-1].set_color('orange')
 
 # Commented out lines include convenient code for debugging purposes
-def main(env_name, DOF, total_num_cfgs, key=None):
-    # DOF = 2
-    # env_name = # '2instance'
-
-    dataset = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name))
-    cfgs = dataset['data'].double()
-    labels = dataset['label'].double()
-    dists = dataset['dist'].double()
+def main(datapath, total_num_cfgs, key=None):
+    dataset = torch.load(datapath)
+    cfgs = dataset['data']
+    labels = dataset['label']
+    dists = dataset['dist']
     obstacles = dataset['obs']
-    obstacles = [obs+(i, ) for i, obs in enumerate(obstacles)]
-    print(obstacles)
     robot = dataset['robot'](*dataset['rparam'])
     width = robot.link_width
     train_num = 6000
     fkine = robot.fkine
 
+    env_name = os.path.splitext(os.path.basename(datapath))[0]
     if key is not None:
         env_name = f'{env_name}_{key}'
     checker = DiffCo(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
@@ -196,6 +165,8 @@ def main(env_name, DOF, total_num_cfgs, key=None):
     min_score = dist_est(cfgs[train_num:]).min().item()
     print('MIN_SCORE = {:.6f}'.format(min_score))
 
+    fcl_checker = FCLChecker(obstacles, robot, label_type='binary')
+
     # return # DEBUGGING
 
     cfg_path_plots = []
@@ -204,55 +175,66 @@ def main(env_name, DOF, total_num_cfgs, key=None):
     elif robot.dof == 2:
         fig, ax, link_plot, joint_plot, eff_plot, cfg_path_plots = create_plots(robot, obstacles, dist_est, checker)
 
-
-    path_dir = 'results/escape'
-    os.makedirs(path_dir, exist_ok=True)
-
     optim_esc_options = {
-        'N_WAYPOINTS': 20,
-        'safety_margin': min_score/5,
-        'lr': 5e-2,
+        'N_WAYPOINTS': 3,
+        'safety_margin': 0, #min_score/10,
+        'lr': 0.2,
         'record_freq': None, # only last configuration
         'post_transform': utils.wrap2pi,
         'optimizer': torch.optim.Adam
     }
 
     cnt_valid = 0
-    while cnt_valid < total_num_cfgs:
-        cfg = resampling_escape(robot)
-        cfg = optim_escape(robot, dist_est, cfg, optim_esc_options)
-        # if fcl_checker(cfg):
+    cnt_sampled = 0
+    cnt_diffco_check = 0
+    cnt_fcl_check = 0
+    valid_cfgs = []
+    optim_sampler = OptimSampler(robot, dist_est, optim_esc_options)
+    t_sampling = time()
+    with tqdm(total=total_num_cfgs) as pbar:
+        while cnt_valid < total_num_cfgs:
+            cfg = resampling_escape(robot)
+            cnt_sampled += 1
+            if key == 'optim':
+                cfg, tmp_diffco_check = optim_sampler.optim_escape(cfg)
+                cfg = cfg[0]
+                cnt_diffco_check += tmp_diffco_check
+            if fcl_checker(cfg, distance=False)[0] < 0:
+                valid_cfgs.append(cfg)
+                cnt_valid += 1
+                pbar.update(1)
+            cnt_fcl_check += 1
+    t_sampling = time() - t_sampling
+    print(f'{key} took {t_sampling} seconds to reach {total_num_cfgs} valid configurations')
+    print(f'Total sampled {cnt_sampled}, fcl check {cnt_fcl_check} times, diffco check {cnt_diffco_check} times')
 
-
-    pathname = os.path.join(path_dir, 'esc_2d_{}dof_{}.json'.format(robot.dof, env_name))
+    path_dir = 'results/escape'
+    os.makedirs(path_dir, exist_ok=True)
+    valid_cfgs = torch.stack(valid_cfgs[:100])
+    pathname = os.path.join(path_dir, f'esc_{env_name}.json')
     with open(pathname, 'w') as f:
-        json.dump({'path': p.data.numpy().tolist(), },f, indent=1)
+        json.dump({
+            'time': t_sampling,
+            'key': key,
+            'cnt_sampled': cnt_sampled,
+            'cnt_fcl_check': cnt_fcl_check,
+            'cnt_diffco_check': cnt_diffco_check,
+            'cfgs': valid_cfgs.data.numpy().tolist(), 
+            'options': {k: str(optim_esc_options[k]) for k in optim_esc_options}
+        }, f, indent=1)
         print('Plan recorded in {}'.format(f.name))
 
     ## This is for loading previously computed trajectory
     with open(pathname, 'r') as f:
-        optim_rec = json.load(f)
-        # p = torch.FloatTensor(path_dict['solution'])
-        # path_history = [torch.FloatTensor(shot) for shot in path_dict['path_history']] #[p] #
-    
-    ## This produces an animation for the trajectory
-    # vid_name = None #'results/maual_trajopt_2d_{}dof_{}_fitting_{}_eps_{}_dif_{}_updates_{}_steps_{}.mp4'.format(
-    #     # robot.dof, env_name, fitting_target, Epsilon, dif_weight, UPDATE_STEPS, N_STEPS)
-    # if robot.dof == 2:
-    #     animation_demo(
-    #         robot, p, fig, link_plot, joint_plot, eff_plot, 
-    #         cfg_path_plots=cfg_path_plots, path_history=path_history, save_dir=vid_name)
-    # elif robot.dof == 7:
-    #     animation_demo(robot, p, fig, link_plot, joint_plot, eff_plot, save_dir=vid_name)
+        valid_cfg_rec = json.load(f)
 
-    # (Recommended) This produces a single shot of the planned trajectory
-    optim_rec['solution'] = optim_rec['solution'][0:1] + optim_rec['solution'][1:-2:2]+optim_rec['solution'][-2:]
-    single_plot(robot, torch.FloatTensor(optim_rec['solution']), fig, link_plot, joint_plot, eff_plot, cfg_path_plots=cfg_path_plots, ax=ax)
+    # (Recommended) This produces a single shot of the valid cfgs
+    single_plot(robot, torch.FloatTensor(valid_cfg_rec['cfgs']), fig, link_plot, joint_plot, eff_plot, cfg_path_plots=cfg_path_plots, ax=ax)
     plt.tight_layout()
-    fig_dir = 'figs/safetybias'
+    fig_dir = 'figs/escape'
     os.makedirs(fig_dir, exist_ok=True)
     # plt.show()
-    plt.savefig(os.path.join(fig_dir, '_new_2d_{}dof_{}.png'.format(robot.dof, env_name)), dpi=500)
+    plt.savefig(os.path.join(fig_dir, '2d_{}dof_{}.png'.format(robot.dof, env_name)), dpi=500)
     # plt.savefig(os.path.join(fig_dir, '_new_2d_{}dof_{}_equalmargin'.format(robot.dof, env_name)), dpi=500) #_equalmargin.png
 
     # plt.savefig('figs/opening_contourline.png', dpi=500, bbox_inches='tight')
@@ -263,5 +245,6 @@ def main(env_name, DOF, total_num_cfgs, key=None):
 
 
 if __name__ == "__main__":
-    main('2class_2', 7, key=None) #'equalmargin'
+    main('data/compare_escape/2d_7dof_300obs_binary_7d_narrow.pt', 1000, key='optim') #'equalmargin'
+    # main('data/compare_escape/2d_7dof_300obs_binary_7d_narrow.pt', 1000, key='resampling') #'equalmargin'
     # main('2class_1', 3, key='equalmargin')

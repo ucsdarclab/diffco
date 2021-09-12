@@ -190,7 +190,7 @@ def main(DOF=None, env_name=None, filename=None, lmbda=10):
         checker = pickle.load(f)
         print('checker loaded: {}'.format(f.name))
 
-    fitting_target = 'dist' # {label, dist, hypo}
+    fitting_target = 'label' # {label, dist, hypo}
     Epsilon = 0.01
     checker.fit_poly(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine) # epsilon=Epsilon, 
     # checker.fit_poly(kernel_func=kernel.MultiQuadratic(Epsilon), target=fitting_target, fkine=fkine)
@@ -288,17 +288,17 @@ def main(DOF=None, env_name=None, filename=None, lmbda=10):
     # ax.spines['bottom'].set_position('center')
     # ax.
 
-    from scipy import stats
-    slope, intercept, r_value, p_value, std_err = stats.linregress(est_grid.numpy().reshape(-1), gt_grid.numpy().reshape(-1))
-    print('{}DOF, environment {}, with FK {}, r-squared: {}'.format(DOF, env_name, checker.fkine is not None, r_value**2))
-    ax.text(xlim_max/4, -7*ylim_max/8, '$\\mathrm{R}^2='+('{:.4f}$'.format(r_value**2)), fontsize=15, 
-        bbox=dict(boxstyle='round', facecolor='wheat', alpha=1))
+    # from scipy import stats
+    # slope, intercept, r_value, p_value, std_err = stats.linregress(est_grid.numpy().reshape(-1), gt_grid.numpy().reshape(-1))
+    # print('{}DOF, environment {}, with FK {}, r-squared: {}'.format(DOF, env_name, checker.fkine is not None, r_value**2))
+    # ax.text(xlim_max/4, -7*ylim_max/8, '$\\mathrm{R}^2='+('{:.4f}$'.format(r_value**2)), fontsize=15, 
+    #     bbox=dict(boxstyle='round', facecolor='wheat', alpha=1))
     # ax.set_title('{} original supports, {} random samples'.format(checker.num_origin_supports, checker.n_left_out_points))
 
-    plt.show()
+    # plt.show()
     # plt.savefig('figs/correlation/training_{}dof_{}_{}_{}ransample_rsquare.png'.format(DOF, env_name, 'hybriddiffco', checker.n_left_out_points))
     # plt.savefig('figs/correlation/{}dof_{}_{}.pdf'.format(DOF, env_name, fitting_target))#, dpi=500)
-    # plt.savefig('figs/correlation/{}dof_{}_{}_{}_rsquare.png'.format(DOF, env_name, fitting_target, 'woFK' if checker.fkine is None else 'withFK'), dpi=300)
+    plt.savefig('figs/correlation/{}dof_{}_{}_{}.png'.format(DOF, env_name, fitting_target, 'woFK' if checker.fkine is None else 'withFK'), dpi=300)
     
     # ''' 
 

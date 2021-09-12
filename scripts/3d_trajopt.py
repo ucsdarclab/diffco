@@ -641,9 +641,11 @@ def main():
             'lr': 5e-2
         }
         # start_cfg = torch.FloatTensor([65, 14, 122, -82, 0, 94, 44])/180*np.pi
-        start_cfg = torch.FloatTensor([-84, -21, 8, 62, 91, 79, -132, 41, -42, 35, 126, -120, 108, 158])/180*np.pi # baxter, self collision
+        # start_cfg = torch.FloatTensor([-84, -21, 8, 62, 91, 79, -132, 41, -42, 35, 126, -120, 108, 158])/180*np.pi # baxter, self collision 1
+        start_cfg = torch.FloatTensor([-12, 28, -95, 85, 147, 1, -27, 22, -21, 48, 97, -51, -42, -14])/180*np.pi # baxter, self collision 2
         p = escape(robot, dist_est, start_cfg, options_escape)
-        with open('results/path_3d_{}_{}_escape.json'.format(robot_name, env_name), 'w') as f:
+        pathname = 'results/path_3d_{}_{}_escape2.json'.format(robot_name, env_name)
+        with open(pathname, 'w') as f:
             json.dump(
                 {
                     'path': p.data.numpy().tolist(), 

@@ -6,15 +6,60 @@ from time import time
 from . import kernel
 from .Obstacles import Obstacle
 from .DiffCo import CollisionChecker
+from .Obstacles import FCLObstacle
 import fcl
 
 
 class FCLChecker(CollisionChecker):
-    def __init__(self, obstacles, robot, robot_manager, obs_managers):
+    def __init__(self, obstacles, robot, robot_manager=None, obs_managers=None, label_type=None, num_class=None):
         super().__init__(obstacles)
         self.robot = robot
         self.robot_manager = robot_manager
         self.obs_managers = obs_managers
+        self.label_type = label_type
+        self.num_class = num_class
+
+        if self.robot_manager is None:
+            rand_cfg = torch.rand(robot.dof)
+            rand_cfg = rand_cfg * (robot.limits[:, 1]-robot.limits[:, 0]) + robot.limits[:, 0]
+            robot_links = robot.update_polygons(rand_cfg)
+            robot_manager = fcl.DynamicAABBTreeCollisionManager()
+            robot_manager.registerObjects(robot_links)
+            robot_manager.setup()
+            self.robot_manager = robot_manager
+        
+        if self.obs_managers is None:
+            assert label_type == 'binary' or label_type == 'instance' or \
+                (label_type == 'class' and num_class is not None), \
+                (f'When obs_managers is not provided one need to provide label type: \
+                label_type={label_type}, num_class={num_class}')
+
+            fcl_obs = [FCLObstacle(*param) for param in obstacles]
+            fcl_collision_obj = [fobs.cobj for fobs in fcl_obs]
+
+            if label_type == 'binary':
+                obs_managers = [fcl.DynamicAABBTreeCollisionManager()]
+                obs_managers[0].registerObjects(fcl_collision_obj)
+                obs_managers[0].setup()
+            elif label_type == 'instance':
+                obs_managers = [fcl.DynamicAABBTreeCollisionManager() for _ in fcl_obs]
+                for mng, cobj in zip(obs_managers, fcl_collision_obj):
+                    mng.registerObjects([cobj])
+            elif label_type == 'class':
+                obs_managers = [fcl.DynamicAABBTreeCollisionManager() for _ in range(num_class)]
+                obj_by_cls = [[] for _ in range(num_class)]
+                for obj in fcl_obs:
+                    obj_by_cls[obj.category].append(obj.cobj)
+                for mng, obj_group in zip(obs_managers, obj_by_cls):
+                    mng.registerObjects(obj_group)
+            else:
+                raise NotImplementedError('Unsupported label_type {}'.format(label_type))
+            
+            for mng in obs_managers:
+                mng.setup()
+            
+            self.obs_managers = obs_managers
+        
         self.num_class = len(obs_managers)
     
     def predict(self, X, distance=True):

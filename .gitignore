@@ -5,6 +5,8 @@ results/
 docker/
 run_image.bash
 data/*/
+data_tmprenamed/
+data/
 figs/
 visual/
 *.png

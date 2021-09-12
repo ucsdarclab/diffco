@@ -51,40 +51,52 @@ def create_plots(robot, obstacles, cfg=None):
     # Plot robot
     if cfg is None:
         cfg = torch.rand(1, robot.dof, dtype=torch.float32)
-        cfg = cfg * (robot.limits[:, 1]-robot.limits[:, 0]) + robot.limits[:, 0]
+        # cfg = cfg * (robot.limits[:, 1]-robot.limits[:, 0]) + robot.limits[:, 0]
+        cfg = cfg * (robot.limits[:, 1]-robot.limits[:, 0])/6 + (robot.limits[:, 0]+robot.limits[:, 1])/2# temp
     points = robot.fkine(cfg)[0]
     points = torch.cat([torch.zeros(1, points.shape[1]), points], dim=0)
     trans = ax.transData.transform
     lw = ((trans((1, robot.link_width))-trans((0,0)))*72/ax.figure.dpi)[1]
-    link_plot, = ax.plot(points[:, 0], points[:, 1], color='silver', lw=lw, solid_capstyle='round', path_effects=[path_effects.SimpleLineShadow(), path_effects.Normal()])
+    link_plot, = ax.plot(points[:, 0], points[:, 1], color='silver', lw=lw, solid_capstyle='round',)# path_effects=[path_effects.SimpleLineShadow(), path_effects.Normal()]) Temp
     joint_plot, = ax.plot(points[:-1, 0], points[:-1, 1], 'o', color='tab:red', markersize=lw)
     eff_plot, = ax.plot(points[-1:, 0], points[-1:, 1], 'o', color='black', markersize=lw)
 
-def generate_one(robot, obs_num, folder, label_type='binary', num_class=None, num_points=8000, env_id='', vis=True):
-    obstacles = []
+def generate_one(robot, folder, obs_num, obstacles=None, label_type='binary', num_class=None, num_points=8000, env_id='', vis=True):
     types = ['rect', 'circle']
     link_length = robot.link_length[0].item()
-    for i in range(obs_num):
-        obs_t = types[randint(2)]
-        if types[0] in obs_t: # rectangle, size = 0.5-3.5, pos = -7~7
-            while True:
-                s = rand(2) * 3 + 0.5
-                if obs_num <= 2:
-                    p = rand(2) * 10 - 5
-                else:
-                    p = rand(2) * 14 - 7
-                if any(p-s/2 > link_length) or any(p+s/2 < -link_length): # the near-origin area is clear
-                    break
-        elif types[1] in obs_t: # circle, size = 0.25-2, pos = -7~7
-            while True:
-                s = rand() * 1.75 + 0.25
-                if obs_num <= 2:
-                    p = rand(2) * 10 - 5
-                else:
-                    p = rand(2) * 14 - 7
-                if np.linalg.norm(p) > s+link_length:
-                    break
-        obstacles.append((obs_t, p, s))
+    if obstacles is None:
+        obstacles = []
+        for i in range(obs_num):
+            obs_t = types[randint(2)]
+            if types[0] in obs_t: # rectangle, size = 0.5-3.5, pos = -7~7
+                while True:
+                    s = rand(2) * 3 + 0.5
+                    if obs_num <= 2:
+                        p = rand(2) * 10 - 5
+                    else:
+                        p = rand(2) * 14 - 7
+                    if any(p-s/2 > link_length) or any(p+s/2 < -link_length): # the near-origin area is clear
+                        break
+            elif types[1] in obs_t: # circle, size = 0.25-2, pos = -7~7
+                while True:
+                    s = rand() * 1.75 + 0.25
+                    if obs_num <= 2:
+                        p = rand(2) * 10 - 5
+                    else:
+                        p = rand(2) * 14 - 7
+                    if np.linalg.norm(p) > s+link_length:
+                        break
+            obstacles.append((obs_t, p, s))
+    
+    os.makedirs(folder, exist_ok=True)
+    if vis:
+        create_plots(robot, obstacles, cfg=None) 
+        plt.savefig(os.path.join(
+            folder, '2d_{}dof_{}obs_{}_{}.png'.format(robot.dof, obs_num, label_type, env_id)), 
+            dpi=200)
+        plt.close()
+    
+    # return
     
     fcl_obs = [FCLObstacle(*param) for param in obstacles]
     fcl_collision_obj = [fobs.cobj for fobs in fcl_obs]
@@ -160,12 +172,6 @@ def generate_one(robot, obs_num, folder, label_type='binary', num_class=None, nu
     }
     torch.save(dataset, os.path.join(
         folder, '2d_{}dof_{}obs_{}_{}.pt'.format(robot.dof, obs_num, label_type, env_id)))
-
-    if vis:
-        create_plots(robot, obstacles, cfg=None)
-        plt.savefig(os.path.join(
-            folder, '2d_{}dof_{}obs_{}_{}.png'.format(robot.dof, obs_num, label_type, env_id)))
-        plt.close()
     
     return 
         
