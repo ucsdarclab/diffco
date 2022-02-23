@@ -290,6 +290,7 @@ class BaxterDualArmFK(Model):
         self.fkine_backup = torch.cat([t[:, :, :3, 3] for t in cum_tfs], dim=1) # (len(q), 2 * sum(self.fk_mask), 3)
         return self.fkine_backup
 
+BaxterFK = BaxterLeftArmFK
 
 class PandaFK(Model):
     def __init__(self):

@@ -18,3 +18,4 @@ debug/
 *.pyc
 misc/small_test.py
 misc/getting_started_active.py
+data_sameas_before_renaming/

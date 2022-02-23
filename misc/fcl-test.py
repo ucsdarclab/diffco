@@ -18,10 +18,10 @@ o1 = fcl.CollisionObject(g1, t1)
 # g2 = fcl.Cone(1,3)
 # g2 = fcl.Cylinder(0.01, 1000)
 g2 = fcl.Box(10,20,1000)
-t2 = fcl.Transform( Rotation.from_rotvec([0., 0., np.pi/4]).as_quat()[[3,0,1,2]], [100., 0., 0.])
+t2 = fcl.Transform( Rotation.from_rotvec([0., 0., np.pi/4]).as_quat()[[3,0,1,2]], [10., 0., 0.])
 o2 = fcl.CollisionObject(g2, t2)
 
-request = fcl.DistanceRequest(enable_nearest_points=True)#, gjk_solver_type=fcl.GJKSolverType.GST_LIBCCD)
+request = fcl.DistanceRequest(enable_nearest_points=True, enable_signed_distance=True)#, gjk_solver_type=fcl.GJKSolverType.GST_LIBCCD)
 result = fcl.DistanceResult()
 # request.enable_signed_distance = True
 # request.distance_tolerance = 0.01
@@ -52,3 +52,4 @@ ret = fcl.distance(o1, o2, request, result)
 # plt.show()
 
 print(result.nearest_points) #, result.contacts[0].penetration_depth)
+print(result.min_distance) #, result.contacts[0].penetration_depth)

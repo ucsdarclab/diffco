@@ -76,11 +76,17 @@ manager2.setup()
 #=====================================================================
 # Managed many to many collision checking
 #=====================================================================
-req = fcl.CollisionRequest(num_max_contacts=100, enable_contact=True)
-rdata = fcl.CollisionData(request = req)
-manager1.collide(manager2, rdata, fcl.defaultCollisionCallback)
-print('Collision between manager 1 and manager 2?: {}'.format(rdata.result.is_collision))
-print('Contacts:')
-for c in rdata.result.contacts:
-    print('\tO1: {}, O2: {}, depth: {}, pos: {}, normal: {}'.format(c.o1, c.o2, c.penetration_depth, c.pos, c.normal))
-print(1-2/np.sqrt(5))
+# req = fcl.CollisionRequest(num_max_contacts=100, enable_contact=True)
+# rdata = fcl.CollisionData(request = req)
+req = fcl.DistanceRequest(enable_nearest_points=True, enable_signed_distance=True)
+# ddata = fcl.DistanceData(request = req)
+res = fcl.DistanceResult()
+# manager1.distance(manager2, rdata, fcl.defaultDistanceCallback)
+# manager1.distance(manager2, ddata, fcl.defaultDistanceCallback)
+fcl.distance(objs1[0], objs2[0], request=req, result=res)
+# print('Collision between manager 1 and manager 2?: {}'.format(ddata.result.is_collision))
+print('Collision between manager 1 and manager 2?: {}'.format(res.min_distance))
+# print('Contacts:')
+# for c in ddata.result.contacts:
+#     print('\tO1: {}, O2: {}, depth: {}, pos: {}, normal: {}'.format(c.o1, c.o2, c.penetration_depth, c.pos, c.normal))
+# print(1-2/np.sqrt(5))
