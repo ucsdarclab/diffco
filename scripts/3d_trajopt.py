@@ -58,8 +58,9 @@ class DiffCoplusBaxterExperiments(object):
         ## Create a `DisplayTrajectory`_ ROS publisher which is used to display
         ## trajectories in Rviz:
         display_trajectory_publisher = rospy.Publisher('/move_group/display_planned_path',
-                                                    moveit_msgs.msg.DisplayTrajectory)#,
-                                                    # queue_size=1)
+                                                    moveit_msgs.msg.DisplayTrajectory,
+                                                    queue_size=1)
+        rospy.sleep(2)
         self.motion_plan_request_publisher = rospy.Publisher('/move_group/motion_plan_request',
                                                     moveit_msgs.msg.MotionPlanRequest,
                                                     queue_size=1)

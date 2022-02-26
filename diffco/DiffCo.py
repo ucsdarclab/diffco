@@ -35,6 +35,7 @@ class DiffCo(CollisionChecker):
         # self.gamma = self.kernel_func.gamma #C0.2 # 1/(2*self.support_points.var())
         self.beta = beta
         self.fkine = None
+        self._cuda = False
 
     def train(self, X, y, max_iteration=1000, method='original', distance=None, keep_all=False):
         self.train_method = method
@@ -48,11 +49,6 @@ class DiffCo(CollisionChecker):
             self.train_svm()
         
         if not keep_all:
-            # self.support_points = self.support_points[self.gains != 0]
-            # self.hypothesis = self.hypothesis[self.gains != 0]
-            # self.y = self.y[self.gains != 0]
-            # self.distance = self.distance[self.gains != 0] if self.distance is not None else None
-            # self.gains = self.gains[self.gains != 0]
             self.filter_support_points_(self.gains != 0)
         time_elapsed = time() - time_start
         print('{} training done. {:.4f} secs cost'.format(method, time_elapsed))
@@ -66,9 +62,6 @@ class DiffCo(CollisionChecker):
         self.kernel_matrix = self.kernel_matrix[np.ix_(mask, mask)]
 
     def train_perceptron(self, X, y, max_iteration=1000):
-        # self.y = torch.zeros(len(self.support_points))
-        # for i in range(len(self.support_points)):
-        #     self.y[i] = 1 if self.gt_checker.is_collision(self.support_points[i]) else -1
         self.initialize(X, y)
         
         print('DiffCo training...')
@@ -166,12 +159,22 @@ class DiffCo(CollisionChecker):
         self.rbf_kernel = kernel_func
         kmat = self.rbf_kernel(X, X)
 
-        self.rbf_nodes = torch.solve(y[:, None], kmat).solution.reshape(-1)
+        self.rbf_nodes = torch.linalg.solve(kmat, y[:, None]).reshape(-1)
         # print(kmat@self.rbf_nodes) # DEBUG
+        if self._cuda:
+            self.cuda()
+    
+    def cuda(self):
+        self.support_points = self.support_points.cuda()
+        if self.fkine is not None:
+            self.support_fkine = self.support_fkine.cuda()
+        self.rbf_nodes = self.rbf_nodes.cuda()
+        self._cuda = True
     
     def rbf_score(self, point):
         if point.ndim == 1:
             point = point[np.newaxis, :]
+        point = point.to(self.rbf_nodes.device)
         if self.fkine is not None:
             point = self.fkine(point).reshape([len(point), -1])
             supports = self.support_fkine

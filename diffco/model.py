@@ -159,6 +159,12 @@ class DHParameters():
         self.alpha = torch.FloatTensor(alpha)
         self.d = torch.FloatTensor(d)
         self.theta = torch.FloatTensor(theta)
+    
+    def cuda(self):
+        self.a = self.a.cuda()
+        self.alpha = self.alpha.cuda()
+        self.d = self.d.cuda()
+        self.theta = self.theta.cuda()
 
 class BaxterLeftArmFK(Model):
     # Left arm of Baxter robot
@@ -214,6 +220,66 @@ class BaxterLeftArmFK(Model):
                 cum_tfs.append(tmp_tf)
         self.fkine_backup = torch.stack([t[:, :3, 3] for t in cum_tfs], dim=1)
         return self.fkine_backup
+
+class BaxterRightArmFK(Model):
+    # Left arm of Baxter robot
+    def __init__(self):
+        # measurement source: 
+        # https://www.ohio.edu/mechanical-faculty/williams/html/pdf/BaxterKinematics.pdf
+        self.limits = torch.FloatTensor([[-1.70167993878, 1.70167993878],
+                        [-2.147, 1.047],
+                        [-3.05417993878, 3.05417993878],
+                        [-0.05, 2.618],
+                        [-3.059, 3.059],
+                        [-1.57079632679, 2.094],
+                        [-3.059, 3.059]])
+        L = torch.FloatTensor([
+            270.35, # L0
+            69,     # L1
+            364.35, # L2
+            69,     # L3
+            374.29, # L4
+            10,     # L5
+            387.35  # L6, from the center of wrist-pitch to the end effector tip
+            ]) / 1000
+        self.L = L
+        
+        # modeling source: 
+        # https://www.researchgate.net/publication/299640286_Baxter_Kinematic_Modeling_Validation_and_Reconfigurable_Representation
+        self.dhparams = DHParameters(
+            a = [L[1], 0, L[3], 0, L[5], 0, 0],
+            alpha=[-pi/2, pi/2, -pi/2, pi/2, -pi/2, pi/2, 0], # different from the document, all alphas of right arms have been reverted to align with urdf
+            d=  [L[0], 0, L[2], 0, L[4], 0, L[6]],
+            theta=[0, pi/2, 0, 0, 0, 0, 0]
+        )
+        self.c_alpha = self.dhparams.alpha.cos()
+        self.s_alpha = self.dhparams.alpha.sin()
+        self.dof = 7
+        self.fk_mask = [True, False, True, False, True, False, True]
+        self.fkine_backup = None
+    
+    def fkine(self, q, reuse=False):
+        if reuse:
+            return self.fkine_backup
+        q = torch.reshape(q, (-1, self.dof))
+        angles = q + self.dhparams.theta
+        tfs = DH2mat(angles, self.dhparams.a, self.dhparams.d, self.s_alpha, self.c_alpha)
+        assert tfs.shape == (len(q), self.dof, 4, 4)
+        cum_tfs = []
+        tmp_tf = tfs[:, 0]
+        if self.fk_mask[0]:
+            cum_tfs.append(tmp_tf)
+        for i in range(1, self.dof):
+            tmp_tf = torch.bmm(tmp_tf, tfs[:, i])
+            if self.fk_mask[i]:
+                cum_tfs.append(tmp_tf)
+        self.fkine_backup = torch.stack([t[:, :3, 3] for t in cum_tfs], dim=1)
+        return self.fkine_backup
+    
+    def cuda(self):
+        self.dhparams.cuda()
+        self.s_alpha = self.s_alpha.cuda()
+        self.c_alpha = self.c_alpha.cuda()
 
 class BaxterDualArmFK(Model):
     def __init__(self):
