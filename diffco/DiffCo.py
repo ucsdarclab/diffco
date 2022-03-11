@@ -171,6 +171,10 @@ class DiffCo(CollisionChecker):
         self.rbf_nodes = self.rbf_nodes.cuda()
         self._cuda = True
     
+    @property
+    def device(self):
+        return self.support_points.device
+    
     def rbf_score(self, point):
         if point.ndim == 1:
             point = point[np.newaxis, :]
