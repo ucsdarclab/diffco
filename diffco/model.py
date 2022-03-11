@@ -242,7 +242,7 @@ class BaxterLeftArmFK(Model):
         return wrap2pi(q)
 
 class BaxterRightArmFK(Model):
-    # Left arm of Baxter robot
+    # Right arm of Baxter robot
     def __init__(self):
         # measurement source: 
         # https://www.ohio.edu/mechanical-faculty/williams/html/pdf/BaxterKinematics.pdf
@@ -300,6 +300,7 @@ class BaxterRightArmFK(Model):
         self.dhparams.cuda()
         self.s_alpha = self.s_alpha.cuda()
         self.c_alpha = self.c_alpha.cuda()
+        self.limits = self.limits.cuda()
     
     def wrap(self, q):
         return wrap2pi(q)
