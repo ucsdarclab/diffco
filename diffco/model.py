@@ -3,7 +3,7 @@ import torch
 import numpy as np
 from numpy import pi
 from scipy.spatial.transform import Rotation
-from .utils import rot_2d, euler2mat, DH2mat, rotz
+from .utils import rot_2d, euler2mat, DH2mat, rotz, wrap2pi
 import trimesh
 
 class Model():
@@ -15,6 +15,9 @@ class Model():
         raise NotImplementedError
     
     def polygons(self, q):
+        raise NotImplementedError
+    
+    def wrap(self, q):
         raise NotImplementedError
 
 class RevolutePlanarRobot(Model):
@@ -68,6 +71,9 @@ class RevolutePlanarRobot(Model):
                 #     [point[0], point[1], 0])))
 
         return self.collision_objs
+    
+    def wrap(self, q):
+        return wrap2pi(q)
 
 class RigidPlanarBody(Model):
     def __init__(self, parts, limits=None):
@@ -104,6 +110,12 @@ class RigidPlanarBody(Model):
                     [trans[0], trans[1], 0]))
 
         return self.collision_objs
+    
+    def wrap(self, q):
+        xy = q[..., :2]
+        theta = q[..., 2:]
+        return torch.cat((xy, wrap2pi(theta)), dim=-1)
+
 
 class RigidBody(Model):
     def __init__(self, body_path, keypoints=None, limits=None, transform=None, center=True):
@@ -152,6 +164,11 @@ class RigidBody(Model):
             Rotation.from_matrix(euler2mat(q[3:])[0].numpy()).as_quat()[[3,0,1,2]], q[:3]))
 
         return self.collision_objs
+    
+    def wrap(self, q):
+        xyz = q[..., :3]
+        ang = q[..., 3:]
+        return torch.cat((xyz, wrap2pi(ang)), dim=-1)
 
 class DHParameters():
     def __init__(self, a=0, alpha=0, d=0, theta=0):
@@ -220,6 +237,9 @@ class BaxterLeftArmFK(Model):
                 cum_tfs.append(tmp_tf)
         self.fkine_backup = torch.stack([t[:, :3, 3] for t in cum_tfs], dim=1)
         return self.fkine_backup
+    
+    def wrap(self, q):
+        return wrap2pi(q)
 
 class BaxterRightArmFK(Model):
     # Left arm of Baxter robot
@@ -280,6 +300,9 @@ class BaxterRightArmFK(Model):
         self.dhparams.cuda()
         self.s_alpha = self.s_alpha.cuda()
         self.c_alpha = self.c_alpha.cuda()
+    
+    def wrap(self, q):
+        return wrap2pi(q)
 
 class BaxterDualArmFK(Model):
     def __init__(self):
@@ -355,6 +378,9 @@ class BaxterDualArmFK(Model):
                 cum_tfs.append(tmp_tf)
         self.fkine_backup = torch.cat([t[:, :, :3, 3] for t in cum_tfs], dim=1) # (len(q), 2 * sum(self.fk_mask), 3)
         return self.fkine_backup
+    
+    def wrap(self, q):
+        return wrap2pi(q)
 
 BaxterFK = BaxterLeftArmFK
 
