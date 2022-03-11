@@ -4,7 +4,8 @@ from collections import namedtuple
 import torch
 import numpy as np
 from time import time
-from diffco import utils
+from . import utils
+from . import DiffCo
 from scipy.optimize import minimize
 
 OptimizerResult = namedtuple("OptimizerResult", ["x", "misc"])
@@ -12,14 +13,30 @@ OptimizerResult = namedtuple("OptimizerResult", ["x", "misc"])
 class TrajOptimizer:
     def __init__(self, robot, checker, options):
         self.robot = robot
-        self.checker = checker
+        self.checker: DiffCo = checker
         self.options = options
+        self.normalizer = lambda x: x
+        self.unnormalizer = lambda x: x
         # for k in self.options:
         #     setattr(self, k, self.options[k])
         # torch.manual_seed(self.seed)
 
     def step(self, x):
         raise NotImplementedError
+
+    def set_unnormalizer(self, f):
+        # In step(), use unnormalizer before starting.
+        self.unnormalizer = f
+    
+    def set_normalizer(self, f):
+        # In step(), use normalizer before returning.
+        self.normalizer = f
+
+    def set_checker(self, checker):
+        self.checker = checker
+    
+    def set_robot(self, robot):
+        self.robot = robot
 
 
 class Weighted(TrajOptimizer):
@@ -42,40 +59,22 @@ class Weighted(TrajOptimizer):
         # self.seed = options['seed']
         # torch.manual_seed(self.seed)
 
-    @torch.enable_grad()
-    def step(self, p, mask=None):
+    @torch.inference_mode(False)
+    def step(self, p, mask=None, write=True):
+        # with torch.inference_mode(False):
+        assert not torch.is_inference_mode_enabled() and torch.is_grad_enabled(), \
+            (f"torch inference mode = {torch.is_inference_mode_enabled()}, torch grad = {torch.is_grad_enabled()}")
         # trial_histories = []
 
         # found = False
         start_t = time()
-        # for trial_time in range(self.num_re_trials):
         path_history = []
-        # if trial_time == 0:
-        #     if 'init_solution' in options:
-        #         assert isinstance(options['init_solution'], torch.Tensor)
-        #         init_path = options['init_solution']
-        #         assert len(init_path) >= 2
-        #         if len(init_path) == 2:
-        #             rec = {
-        #                 'start_cfg': start_cfg.numpy().tolist(),
-        #                 'target_cfg': target_cfg.numpy().tolist(),
-        #                 'cnt_check': cnt_check,
-        #                 'cost': cost(init_path[1:-1]).item(),
-        #                 'time': time() - start_t,
-        #                 'success': True,
-        #                 'seed': seed,
-        #                 'solution': init_path.numpy().tolist()
-        #             }
-        #             return rec
-        #     else:
-        #         init_path = torch.from_numpy(np.linspace(start_cfg, target_cfg, num=N_WAYPOINTS)).double()
-        # else:
-        #     init_path = torch.rand((N_WAYPOINTS, robot.dof)).double()
-        #     init_path = init_path * (robot.limits[:, 1]-robot.limits[:, 0]) + robot.limits[:, 0]
-        # init_path[0] = start_cfg
-        # init_path[-1] = target_cfg
-        # p = init_path.requires_grad_(True)
-        # opt = torch.optim.Adam([p], lr=lr)
+        if not isinstance(p, torch.Tensor):
+            p = torch.FloatTensor(p)
+        p = self.unnormalizer(p)
+        p = p.to(self.checker.device)
+        p.requires_grad_(True)
+        assert p.requires_grad
         opt: torch.optim.Optimizer = self.optimizer(
             [p], **self.optimizer_params)
         dist_est = self.checker.rbf_score
@@ -114,7 +113,7 @@ class Weighted(TrajOptimizer):
             opt.step()
             p.data = self.robot.wrap(p.data)
             if self.history:
-                path_history.append(p.data.clone())
+                path_history.append(self.normalizer(p.cpu())) #data.clone()
             # if loss.data.numpy() < lowest_loss:
             #     lowest_loss = loss.data.numpy()
             #     lowest_loss_solution = p.data.clone()
@@ -142,6 +141,7 @@ class Weighted(TrajOptimizer):
         #     found = True
         #     break
 
+        p = self.normalizer(p.cpu())
         end_t = time() -start_t
         # if not found:
         #     # print('Did not find a valid solution after {} trials!\
