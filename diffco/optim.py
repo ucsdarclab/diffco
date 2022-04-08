@@ -56,17 +56,18 @@ class Weighted(TrajOptimizer):
         # self.lr = options['lr'] # 5e-1
         self.optimizer = options['optimizer']
         self.optimizer_params = options['optimizer_params']
+        self.dense_check = options['dense_check']
         # self.seed = options['seed']
         # torch.manual_seed(self.seed)
 
+    def setup_logger(self, logger):
+        self._logger = logger
+
     @torch.inference_mode(False)
-    def step(self, p, mask=None, write=True):
-        # with torch.inference_mode(False):
+    def step(self, p, maxiter=None, mask=None, write=True, verbose=False):
         assert not torch.is_inference_mode_enabled() and torch.is_grad_enabled(), \
             (f"torch inference mode = {torch.is_inference_mode_enabled()}, torch grad = {torch.is_grad_enabled()}")
-        # trial_histories = []
 
-        # found = False
         start_t = time()
         path_history = []
         if not isinstance(p, torch.Tensor):
@@ -79,15 +80,19 @@ class Weighted(TrajOptimizer):
             [p], **self.optimizer_params)
         dist_est = self.checker.rbf_score
 
-        for step in range(self.maxiter):
+        maxiter = maxiter if maxiter is not None else self.maxiter
+        if verbose:
+            self._logger.info(f'Stepping begins. Maxiter = {maxiter}')
+        for step in range(maxiter):
             opt.zero_grad()
-            if self.collision_weight != 0:
+            if self.collision_weight != 0:               
+                check_p = utils.dense_path(p, max_step=self.max_speed) if self.dense_check else p
                 collision_score = torch.clamp(
-                    dist_est(p)-self.safety_bias, min=0).sum()
+                    dist_est(check_p)+self.safety_bias, min=0).mean() * len(p) # .sum()
             else:
                 collision_score = 0
             # cnt_check += len(p) # Counting collision checks
-            control_points = self.robot.fkine(p, reuse=True)
+            control_points = self.robot.fkine(p, reuse=not self.dense_check)
             if self.max_move_weight != 0:
                 max_move_cost = torch.clamp(
                     (control_points[1:]-control_points[:-1]).pow(2).sum(dim=2)-self.max_speed**2, min=0).sum()
@@ -98,7 +103,7 @@ class Weighted(TrajOptimizer):
                     torch.clamp(self.robot.limits[:, 0]-p, min=0) + torch.clamp(p-self.robot.limits[:, 1], min=0)).sum()
             else:
                 joint_limit_cost = 0
-            diff = (control_points[1:]-control_points[:-1]).pow(2).sum()
+            diff = (control_points[1:]-control_points[:-1]).pow(2).sum() # .norm(dim=-1).sum() #
             constraint_loss = (
                 self.collision_weight * collision_score
                 + self.max_move_weight * max_move_cost
@@ -112,6 +117,13 @@ class Weighted(TrajOptimizer):
                 p.grad[~mask] = 0.0
             opt.step()
             p.data = self.robot.wrap(p.data)
+            if verbose and (step % (maxiter // 5) == 0 or step+1 == maxiter):
+                self._logger.info(
+                    f"obj {diff:.3f}x1, "
+                    f"col {collision_score:.3f}x{self.collision_weight}, "+
+                    f"jnt {joint_limit_cost:.3f}x{self.joint_limit_weight}, "+
+                    f"spd {max_move_cost:.3f}x{self.max_move_weight}."
+                )
             if self.history:
                 path_history.append(self.normalizer(p.cpu())) #data.clone()
             # if loss.data.numpy() < lowest_loss:
@@ -133,9 +145,10 @@ class Weighted(TrajOptimizer):
             #         max_move_cost.item(), max_move_weight,
             #         diff.item(), dif_weight,
             #         loss.item()))
-            # if constraint_loss <= 1e-2 and torch.norm(p.grad) < 1e-4:
-            #     break
-        # trial_histories.append(path_history)
+            if constraint_loss <= 0.5: # and torch.norm(p.grad) < 1e-4:
+                if verbose: 
+                    self._logger.info(f"Breaking w/ Constraint={constraint_loss}.")
+                break
 
         # if best_valid_solution is not None:
         #     found = True
