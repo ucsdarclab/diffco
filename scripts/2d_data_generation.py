@@ -1,20 +1,8 @@
-import sys
-from diffco import DiffCo
-from diffco import kernel
-from matplotlib import pyplot as plt
+
 import numpy as np
 import torch
 from diffco.model import RevolutePlanarRobot
-import fcl
-from scipy import ndimage
-from matplotlib import animation
-from matplotlib.patches import Rectangle, FancyBboxPatch, Circle
-import seaborn as sns
-sns.set()
-import matplotlib.patheffects as path_effects
-from diffco import utils
-from diffco.Obstacles import FCLObstacle
-from time import time
+
 from generate_batch_data_2d import generate_one
 
 
