@@ -4,23 +4,19 @@ The best to use this is to comment/uncomment certain lines depending on the purp
 '''
 
 import os
-import sys
-import json
 import pickle
-from diffco import DiffCo, MultiDiffCo
-from diffco import kernel
-from matplotlib import pyplot as plt
-import numpy as np
-import torch
-from diffco.model import RevolutePlanarRobot
-import fcl
-from scipy import ndimage
-from matplotlib import animation
-from matplotlib.patches import Rectangle, FancyBboxPatch, Circle
-import seaborn as sns
-sns.set()
+
 import matplotlib.patheffects as path_effects
-from time import time
+import numpy as np
+import seaborn as sns
+import torch
+from diffco import DiffCo, MultiDiffCo, kernel
+from matplotlib import pyplot as plt
+from matplotlib.patches import Circle, Rectangle
+from scipy import ndimage
+
+sns.set()
+
 
 def create_plots(robot, obstacles, dist_est, gt_grid, use3d=False):
     # Adjust figsize according to your specific arrangement
