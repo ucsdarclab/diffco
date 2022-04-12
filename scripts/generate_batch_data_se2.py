@@ -1,22 +1,16 @@
 import os
-from diffco import DiffCo
-from diffco import kernel
-from matplotlib import pyplot as plt
-import numpy as np
-from numpy.random import rand, randint
-import torch
-from diffco.model import RigidPlanarBody
-import fcl
-from scipy import ndimage
-from matplotlib import animation
-from matplotlib.patches import Rectangle, FancyBboxPatch, Circle
-import seaborn as sns
-sns.set()
-import matplotlib.patheffects as path_effects
+
 import matplotlib as mpl
+import numpy as np
+import torch
 from diffco import utils
-from diffco.Obstacles import FCLObstacle
-from time import time
+from diffco.model import RigidPlanarBody
+from matplotlib import pyplot as plt
+from matplotlib.patches import Circle, Rectangle
+from numpy.random import rand, randint
+
+from generate_batch_data_2d import build_dataset
+
 
 def create_plots(robot, obstacles, cfg=None, label=None):
     from matplotlib.cm import get_cmap
@@ -66,7 +60,7 @@ def create_plots(robot, obstacles, cfg=None, label=None):
                 rect_patch.set_transform(tf)
                 ax.add_patch(rect_patch) #, path_effects=[path_effects.withSimplePatchShadow()]
 
-def generate_one(robot, obs_num, folder, label_type='binary', num_class=None, num_points=8000, env_id='', vis=True):
+def generate_obstacles_for_rigid_body(obs_num: int) -> list:
     obstacles = []
     types = ['rect', 'circle']
     # link_length = robot.link_length[0].item()
@@ -85,78 +79,27 @@ def generate_one(robot, obs_num, folder, label_type='binary', num_class=None, nu
             else:
                 p = rand(2) * 14 - 7
         obstacles.append((obs_t, p, s))
-    
-    fcl_obs = [FCLObstacle(*param) for param in obstacles]
-    fcl_collision_obj = [fobs.cobj for fobs in fcl_obs]
-    # geom2instnum = {id(g): i for i, (_, g) in enumerate(fcl_obs)}
+    return obstacles
 
-    cfgs = torch.rand((num_points, robot.dof), dtype=torch.float32)
-    cfgs = cfgs * (robot.limits[:, 1]-robot.limits[:, 0]) + robot.limits[:, 0]
-    if label_type == 'binary':
-        labels = torch.zeros(num_points, 1, dtype=torch.float)
-        dists = torch.zeros(num_points, 1, dtype=torch.float)
-        obs_managers = [fcl.DynamicAABBTreeCollisionManager()]
-        obs_managers[0].registerObjects(fcl_collision_obj)
-        obs_managers[0].setup()
-    elif label_type == 'instance':
-        labels = torch.zeros(num_points, len(obstacles), dtype=torch.float)
-        dists = torch.zeros(num_points, len(obstacles), dtype=torch.float)
-        obs_managers = [fcl.DynamicAABBTreeCollisionManager() for _ in fcl_obs]
-        for mng, cobj in zip(obs_managers, fcl_collision_obj):
-            mng.registerObjects([cobj])
-    elif label_type == 'class':
-        labels = torch.zeros(num_points, num_class, dtype=torch.float)
-        dists = torch.zeros(num_points, num_class, dtype=torch.float)
-        obs_managers = [fcl.DynamicAABBTreeCollisionManager() for _ in range(num_class)]
-        obj_by_cls = [[] for _ in range(num_class)]
-        for obj in fcl_obs:
-            obj_by_cls[obj.category].append(obj.cobj)
-        for mng, obj_group in zip(obs_managers, obj_by_cls):
-            mng.registerObjects(obj_group)
-    
-    robot_links = robot.update_polygons(cfgs[0])
-    robot_manager = fcl.DynamicAABBTreeCollisionManager()
-    robot_manager.registerObjects(robot_links)
-    robot_manager.setup()
-    for mng in obs_managers:
-        mng.setup()
-    req = fcl.CollisionRequest(num_max_contacts=1000, enable_contact=True)
-    
-    times = []
-    st = time()
-    for i, cfg in enumerate(cfgs):
-        st1 = time()
-        robot.update_polygons(cfg)
-        robot_manager.update()
-        for cat, obs_mng in enumerate(obs_managers):
-            rdata = fcl.CollisionData(request = req)
-            robot_manager.collide(obs_mng, rdata, fcl.defaultCollisionCallback)
-            in_collision = rdata.result.is_collision
-            ddata = fcl.DistanceData()
-            robot_manager.distance(obs_mng, ddata, fcl.defaultDistanceCallback)
-            depths = torch.FloatTensor([c.penetration_depth for c in rdata.result.contacts])
-
-            labels[i, cat] = 1 if in_collision else -1
-            dists[i, cat] = depths.abs().max() if in_collision else -ddata.result.min_distance
-        end1 = time()
-        times.append(end1-st1)
-    end = time()
-    times = np.array(times)
-    print('std: {}, mean {}, avg {}'.format(times.std(), times.mean(), (end-st)/len(cfgs)))
-    
-    in_collision = (labels == 1).sum(1) > 0
-    if label_type == 'binary':
-        labels = labels.squeeze_(1)
-        dists = dists.squeeze_(1)
-    print('env_id {}, {} collisions, {} free'.format(
-        env_id, torch.sum(in_collision==1), torch.sum(in_collision==0)))
-    if torch.sum(in_collision==1) == 0:
-        print('0 Collision. You may want to regenerate env {}obs{}'.format(obs_num, env_id))
+def generate_data_rigid_body(
+        robot,
+        folder: str,
+        obs_num: int,
+        label_type: str = 'binary',
+        num_class: int = None,
+        num_points: int = 8000,
+        env_id: str = '',
+        vis: bool = True):
+    """Generate dataset for a 2D rigid body robot.
+    """
+    obstacles = generate_obstacles_for_rigid_body(obs_num)
+    robot, cfgs, labels, dists = build_dataset(robot, obstacles, num_points, num_class, label_type, env_id)
 
     dataset = {
         'data': cfgs, 'label': labels, 'dist': dists, 'obs': obstacles, 
         'robot': robot.__class__, 'rparam': [robot.parts]
     }
+    os.makedirs(folder, exist_ok=True)
     torch.save(dataset, os.path.join(
         folder, 'se2_{}obs_{}_{}.pt'.format(obs_num, label_type, env_id)))
 
@@ -209,4 +152,4 @@ if __name__ == "__main__":
             #         if torch.sum(labels==1) != 0:
             #             continue
             # ==============================================================
-            generate_one(robot, num_obs, folder_name, num_points=8000, env_id='{:02d}'.format(env_id), vis=True)
+            generate_data_rigid_body(robot, folder_name, num_obs, num_points=8000, env_id='{:02d}'.format(env_id), vis=True)

@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from diffco.model import RevolutePlanarRobot
 
-from generate_batch_data_2d import generate_one
+from generate_batch_data_2d import generate_data_planar_manipulators
 
 
 obstacles = {
@@ -96,11 +96,11 @@ def main(
         obstacles = obstacles[env_name]
         lengths = {2: 3.5, 3: 2, 7:1}
         link_length = lengths[dof]
-    obs_num = len(obstacles)
     
     robot = RevolutePlanarRobot(link_length, width, dof) # (7, 1), (2, 3)
 
-    generate_one(robot, folder, obs_num, obstacles, label_type, num_class, num_init_points, env_id=env_name, vis=True)
+    generate_data_planar_manipulators(robot, folder, obstacles, label_type=label_type,
+        num_class=num_class, num_points=num_init_points, env_id=env_name, vis=True)
     return
 
 if __name__ == "__main__":
