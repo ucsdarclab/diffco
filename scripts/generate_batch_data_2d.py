@@ -1,25 +1,15 @@
-import sys
-# sys.path.append('/home/yuheng/DiffCo/')
 import os
 from time import time
 
-import numpy as np
-from numpy.random import rand, randint
-import torch
 import fcl
-from scipy import ndimage
-from matplotlib import animation
-from matplotlib.patches import Rectangle, FancyBboxPatch, Circle
-import seaborn as sns
-sns.set()
-import matplotlib.patheffects as path_effects
-
-from diffco import DiffCo
-from diffco import kernel
-from matplotlib import pyplot as plt
+import numpy as np
+import torch
 from diffco.model import RevolutePlanarRobot
-from diffco import utils
 from diffco.Obstacles import FCLObstacle
+from matplotlib import pyplot as plt
+from matplotlib.patches import Circle, Rectangle
+from numpy.random import rand, randint
+
 
 def create_plots(robot, obstacles, cfg=None):
     from matplotlib.cm import get_cmap
