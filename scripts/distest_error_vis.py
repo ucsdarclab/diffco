@@ -3,6 +3,7 @@ This is a script that comprises several small experiments/demos in the paper.
 The best to use this is to comment/uncomment certain lines depending on the purpose.
 '''
 
+import argparse
 import os
 import pickle
 
@@ -331,28 +332,14 @@ def main(DOF=None, env_name=None, filename=None, lmbda=10):
 
 
 if __name__ == "__main__":
-    # DOF = 2
-    # env_name = '1rect' # '2rect' # '1rect_1circle' '1rect' 'narrow' '2instance' 3circle
-    # envs = [
-    #     # (2, '1rect'),
-    #     # (2, '3circle'),
-    #     # (7, '1rect_1circle_7d'),
-    #     (7, '3circle_7d')
-    #     # (3, '2class_1')
-    # ]
-    # for DOF, env_name in envs:
-    #     main(DOF, env_name=env_name, lmbda=10)
-    # lmbdas = np.power(10, np.arange(-1, 3, step=0.1))
-    # rs = []
-    # for DOF, env_name in envs:
-    #     for lmbda in lmbdas:
-    #         rs.append(main(DOF, env_name, lmbda))
-    # plt.plot(lmbdas, rs)
-    # plt.xticks(lmbdas)
-    # plt.yticks(rs)
-    # plt.show()
-    # with open('results/rvalue_tests.json', 'w') as f:
-    #     json.dump(
-    #         {'lambda': lmbdas.tolist(),
-    #         'rvalues': rs}, f)
-    main(filename='data/3d_baxter_self_both_arms.pt', lmbda=10)
+    desc = 'Tool for calculating and plotting correlation between DiffCo and FCL libraries.'
+    parser = argparse.ArgumentParser(description=desc)
+    parser.add_argument('-d', '--dataset', dest='filename', help='Dataset filepath')
+    parser.add_argument('--dof', dest='DOF', help='degrees of freedom', type=int)
+    parser.add_argument('--env', dest='env_name', help='environment tag name', type=str)
+    parser.add_argument('-l', '--lambdas', dest='lmbda', help='# of lambdas for DiffCo kernel', type=int, default=10)
+    args = parser.parse_args()
+    if not args.filename:
+        if not args.DOF or not args.env_name:
+            parser.error('without dataset, both --dof and --env are required')
+    main(**vars(args))
