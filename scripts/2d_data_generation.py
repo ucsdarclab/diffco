@@ -1,3 +1,4 @@
+import argparse
 
 import numpy as np
 import torch
@@ -53,9 +54,9 @@ obstacles = {
 def main(
         env_name: str = '3d_halfnarrow',
         folder: str = 'data/landscape',
-        label_type: str = 'binary', # [instance, class, binary]
+        label_type: str = 'binary',
         num_class: int = 2,
-        dof: int = 3, # [2, 3, 7]
+        dof: int = 3,
         num_init_points: int = 8000,
         random_seed: int = 2021,
         width: float = 0.3) -> None:
@@ -103,4 +104,17 @@ def main(
     return
 
 if __name__ == "__main__":
-    main()
+    desc = '2D data generation'
+    parser = argparse.ArgumentParser(description=desc)
+    env_choices = ['1rect_1circle', '3circle', '1rect_1circle_7d', '2class_1',
+                   '2class_2', '3circle_7d', '7d_narrow', '3d_halfnarrow']
+    parser.add_argument('-e', '--env', dest='env_name', help='2D environment', choices=env_choices, default='3d_halfnarrow')
+    parser.add_argument('-o', '--output-dir', dest='folder', default='data/landscape')
+    parser.add_argument('-l', '--label-type', choices=['instance', 'class', 'binary'], default='binary')
+    parser.add_argument('-n', '--num-classes', dest='num_class', default=2, type=int)
+    parser.add_argument('-d', '--dof', help='degrees of freedom', choices=[2, 3, 7], default=3)
+    parser.add_argument('-i', '--num-init-points', type=int, default=8000)
+    parser.add_argument('-w', '--width', help='link width', type=float, default=0.3)
+    parser.add_argument('-r', '--random-seed', type=int, default=2021)
+    args = parser.parse_args()
+    main(**vars(args))
