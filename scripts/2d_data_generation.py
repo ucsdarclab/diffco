@@ -6,15 +6,17 @@ from diffco.model import RevolutePlanarRobot
 from generate_batch_data_2d import generate_one
 
 
-def main():
-    env_name = '3d_halfnarrow' # 
-    folder = 'data/landscape'
-    label_type = 'binary' #[instance, class, binary]
-    num_class = 2
-    DOF = 3
-    num_init_points = 8000
-    torch.manual_seed(2021)
-    np.random.seed(2021)
+def main(
+        env_name: str = '3d_halfnarrow',
+        folder: str = 'data/landscape',
+        label_type: str = 'binary', # [instance, class, binary]
+        num_class: int = 2,
+        dof: int = 3, # [2, 3, 7]
+        num_init_points: int = 8000,
+        random_seed: int = 2021,
+        width: float = 0.3) -> None:
+    torch.manual_seed(random_seed)
+    np.random.seed(random_seed)
 
     obstacles = {
         # ('circle', (3, 2), 2), #2circle
@@ -90,11 +92,10 @@ def main():
     else:
         obstacles = obstacles[env_name]
         lengths = {2: 3.5, 3: 2, 7:1}
-        link_length = lengths[DOF]
+        link_length = lengths[dof]
     obs_num = len(obstacles)
-    width = 0.3
     
-    robot = RevolutePlanarRobot(link_length, width, DOF) # (7, 1), (2, 3)
+    robot = RevolutePlanarRobot(link_length, width, dof) # (7, 1), (2, 3)
 
     generate_one(robot, folder, obs_num, obstacles, label_type, num_class, num_init_points, env_id=env_name, vis=True)
     return
