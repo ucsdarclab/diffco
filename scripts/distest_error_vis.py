@@ -167,7 +167,8 @@ def main(
         kernel_type: kernel.KernelFunc = kernel.Polyharmonic,
         fit_full_poly: bool = False,
         scoring_method: str = 'rbf_score',
-        safety_margin: int = 0):
+        safety_margin: int = 0,
+        random_seed: int = None):
     """Run experiment.
 
     checker_type (CollisionChecker): The collision checker class (defaults to
@@ -206,7 +207,13 @@ def main(
         'rbf_score'.
     safety_margin (int): Amount to offset test predictions by when running the
         scoring method. Defaults to 0.
+    random_seed (int): Random seed used to reproduce the same results, useful
+        for debugging. Defaults to None
     """
+    if random_seed:
+        torch.manual_seed(random_seed)
+        np.random.seed(random_seed)
+
     if env_name:
         dataset = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name))
     elif dataset_filepath:
@@ -399,6 +406,7 @@ if __name__ == "__main__":
     parser.add_argument('--fit-full-poly', action='store_true', default=False)
     parser.add_argument('--scoring-method', choices=['rbf_score', 'poly_score', 'score'], default='rbf_score')
     parser.add_argument('--safety_margin', type=int, default=0)
+    parser.add_argument('--random-seed', type=int, default=2021)
     args = parser.parse_args()
 
     # Set checker
