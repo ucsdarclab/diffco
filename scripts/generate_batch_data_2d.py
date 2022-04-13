@@ -3,6 +3,7 @@ from time import time
 
 import fcl
 import numpy as np
+import seaborn as sns
 import torch
 from diffco.model import RevolutePlanarRobot
 from diffco.Obstacles import FCLObstacle
@@ -10,6 +11,7 @@ from matplotlib import pyplot as plt
 from matplotlib.patches import Circle, Rectangle
 from numpy.random import rand, randint
 
+sns.set()
 
 def create_plots(robot, obstacles, cfg=None):
     from matplotlib.cm import get_cmap
