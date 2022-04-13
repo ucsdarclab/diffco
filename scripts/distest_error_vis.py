@@ -11,7 +11,7 @@ import matplotlib.patheffects as path_effects
 import numpy as np
 import seaborn as sns
 import torch
-from diffco import DiffCo, MultiDiffCo, kernel
+from diffco import DiffCo, MultiDiffCo, kernel, CollisionChecker
 from matplotlib import pyplot as plt
 from matplotlib.patches import Circle, Rectangle
 from scipy import ndimage
@@ -151,11 +151,69 @@ def FastronClustering(cfgs, fkine, c_ax):
     c_ax.pcolormesh(xx, yy, preds, cmap='Set1', shading='gouraud', vmin=-0.5, vmax=numClusters-0.5,  alpha=0.05)
     c_ax.grid(False, visible=False)
 
-def main(DOF=None, env_name=None, filename=None, lmbda=10):
+def train():
+    pass
+
+def main(
+        checker_type: CollisionChecker = DiffCo,
+        pretrained_checker: str = None,
+        DOF: int = None,
+        env_name: str = None,
+        dataset_filepath: str = None,
+        lmbda=10,
+        train_all: bool = False,
+        keep_all: bool = False,
+        fitting_target: str = 'label',
+        fitting_epsilon: float = 0.01,
+        kernel_type: kernel.KernelFunc = kernel.Polyharmonic,
+        fit_full_poly: bool = False,
+        scoring_method: str = 'rbf_score',
+        safety_margin: int = 0):
+    """Run experiment.
+
+    checker_type (CollisionChecker): The collision checker class (defaults to
+        DiffCo).
+    pretrained_checker (str): Path to a pretrained collision checker. If
+        provided, the training phase is skipped and the pretrained checker is
+        used instead (may provide a speedup). If None (default), a new collision
+        checker is trained and saved.
+    DOF (int): Robot's degrees of freedom. Used to identify the dataset file if
+        the path to the dataset is not provided. (Should deprecate in favor of
+        requiring dataset filepath?) Defaults to None, but if a dataset filename
+        is not provided, DOF must be provided.
+    env_name (str): Dataset environment nickname. Used to identify the dataset
+        file if the path to the dataset is not provided. (Should deprecate in
+        favor of requiring dataset filepath?) Defaults to None, but if a dataset
+        filename is not provided, env_name must be provided.
+    dataset_filepath (str): Path to dataset. Defaults to None, in which case
+        DOF and env_name must be provided.
+    lmbda (int): Argument passed to RQKernel when training a new collision
+        checker. Defaults to 10.
+    train_all (bool): When True, train on all the data. When False, train on
+        just the training set. Defaults to False.
+    keep_all (bool): Argument for training the collision checker. When False
+        (default), support points are filtered. When True, all support points
+        are kept.
+    fitting_target (str): The fitting target. Must be one of the following:
+        'label', 'dist', or 'hypo'. Defaults to 'label'.
+    fitting_epsilon (float): Argument passed to the checker's fit function.
+        Defaults to 0.01.
+    kernel_type (str): The type of kernel function to use when fit_full_poly is
+        False. Currently supported kernel types are Polyharmonic and
+        MultiQuadratic.
+    fit_full_poly (bool): When True, uses the collision checkers fit_full_poly
+        fitting function. When False (default), uses the fit_poly fitting
+        function.
+    scoring_method (str): Scoring method for the collision checker. Supported
+        scoring methods are 'rbf_score', 'poly_score', and 'score'. Defaults to
+        'rbf_score'.
+    safety_margin (int): Amount to offset test predictions by when running the
+        scoring method. Defaults to 0.
+    """
     if env_name:
         dataset = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name))
-    elif filename:
-        dataset = torch.load(filename)
+    elif dataset_filepath:
+        dataset = torch.load(dataset_filepath)
     cfgs = dataset['data']
     labels = dataset['label']
     dists = dataset['dist']
@@ -167,38 +225,42 @@ def main(DOF=None, env_name=None, filename=None, lmbda=10):
     train_num = 6000
     indices = torch.LongTensor(np.random.choice(len(cfgs), train_num, replace=False))
     fkine = robot.fkine
-    # '''
-    #=============================================================
-    checker = DiffCo(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(lmbda)), beta=1.0) 
-    # checker = MultiDiffCo(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
-    keep_all = False
-    # if 'compare' not in env_name:
-    #     checker.train(cfgs[:train_num], labels[:train_num], max_iteration=len(cfgs[:train_num]), distance=dists[:train_num],
-    #         keep_all=keep_all)
-    # else:
-    #     checker.train(cfgs[indices], labels[indices], max_iteration=len(cfgs[indices]), distance=dists[indices],
-    #         keep_all=keep_all)
-    checker.train(cfgs[:train_num], labels[:train_num], max_iteration=len(cfgs[:train_num]), distance=dists[:train_num],
-        keep_all=keep_all)
-    os.makedirs('results', exist_ok=True)
-    with open('results/checker_errvis.p', 'wb') as f:
-        pickle.dump(checker, f)
-        print('checker saved: {}'.format(f.name))
-    #==== The following can be used alone to save training time in debugging
-    with open('results/checker_errvis.p', 'rb') as f:
-        checker = pickle.load(f)
-        print('checker loaded: {}'.format(f.name))
 
-    fitting_target = 'label' # {label, dist, hypo}
-    Epsilon = 0.01
-    checker.fit_poly(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine) # epsilon=Epsilon, 
-    # checker.fit_poly(kernel_func=kernel.MultiQuadratic(Epsilon), target=fitting_target, fkine=fkine)
-    # checker.fit_full_poly(epsilon=Epsilon, k=3, target=fitting_target, fkine=fkine) #, lmbd=10)
-    dist_est = checker.rbf_score
-    safety_margin = 0
-    #  = checker.score
-    # dist_est = checker.poly_score
-    # '''
+    if pretrained_checker:
+        with open(pretrained_checker, 'rb') as f:
+            checker = pickle.load(f)
+            print('checker loaded: {}'.format(f.name))
+    else:
+        checker = checker_type(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(lmbda)), beta=1.0) 
+        if train_all:
+            checker.train(cfgs[indices], labels[indices], max_iteration=len(cfgs[indices]), distance=dists[indices],
+                keep_all=keep_all)
+        else:
+            checker.train(cfgs[:train_num], labels[:train_num], max_iteration=len(cfgs[:train_num]), distance=dists[:train_num],
+                keep_all=keep_all)
+        os.makedirs('results', exist_ok=True)
+        with open('results/checker_errvis.p', 'wb') as f:
+            pickle.dump(checker, f)
+            print('checker saved: {}'.format(f.name))
+    if fit_full_poly:
+        checker.fit_full_poly(epsilon=fitting_epsilon, k=3, target=fitting_target, fkine=fkine)
+    else:
+        if kernel_type == kernel.Polyharmonic:
+            kernel_func = kernel.Polyharmonic(1, fitting_epsilon)
+        elif kernel_type == kernel.MultiQuadratic:
+            kernel_func = kernel.MultiQuadratic(fitting_epsilon)
+        else:
+            raise NotImplementedError(kernel_type)
+        checker.fit_poly(kernel_func=kernel_func, target=fitting_target, fkine=fkine)
+    if scoring_method == 'rbf_score':
+        dist_est = checker.rbf_score
+    elif scoring_method == 'poly_score':
+        dist_est = checker.poly_score
+    elif scoring_method == 'score':
+        dist_est = checker.score
+    else:
+        raise NotImplementedError(scoring_method)
+
     # Check DiffCo test ACC
     test_num = len(cfgs) - train_num
     test_preds = (dist_est(cfgs[train_num:train_num+test_num])-safety_margin > 0) * 2 - 1
@@ -208,7 +270,6 @@ def main(DOF=None, env_name=None, filename=None, lmbda=10):
     test_tnr = torch.sum(test_preds[test_labels ==-1] == -1, dtype=torch.float32) / len(test_preds[test_labels==-1])
     print('Test acc: {}, TPR {}, TNR {}'.format(test_acc, test_tpr, test_tnr))
     print(len(checker.gains), 'Support Points')
-    # assert(test_acc > 0.9)
     
     '''# =============== test error ============
     # est = est / est.std() * gt_grid.std()
@@ -248,10 +309,7 @@ def main(DOF=None, env_name=None, filename=None, lmbda=10):
     ''' #===============================
 
     # ''' =============== correlation ==============
-    if env_name:
-        gt_grid = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name))['dist']
-    else:
-        gt_grid = dists
+    gt_grid = dists
     # gt_grid = checker.distance
 
     # size = [400, 400]
@@ -285,7 +343,6 @@ def main(DOF=None, env_name=None, filename=None, lmbda=10):
     ax.axvline(0, linestyle='-', color='gray', alpha=0.5)
     # ax.spines['left'].set_position('center')
     # ax.spines['bottom'].set_position('center')
-    # ax.
 
     # from scipy import stats
     # slope, intercept, r_value, p_value, std_err = stats.linregress(est_grid.numpy().reshape(-1), gt_grid.numpy().reshape(-1))
@@ -334,12 +391,37 @@ def main(DOF=None, env_name=None, filename=None, lmbda=10):
 if __name__ == "__main__":
     desc = 'Tool for calculating and plotting correlation between DiffCo and FCL libraries.'
     parser = argparse.ArgumentParser(description=desc)
-    parser.add_argument('-d', '--dataset', dest='filename', help='Dataset filepath')
+    parser.add_argument('-c', '--checker', dest='checker_type', help='Collision checker class',
+        choices=['DiffCo', 'MultiDiffco'], default='DiffCo')
+    parser.add_argument('--pretrained-checker', help='path to pretrained collision checker', type=str, default=None)
+    parser.add_argument('-d', '--dataset', dest='dataset_filepath', help='Dataset filepath')
     parser.add_argument('--dof', dest='DOF', help='degrees of freedom', type=int)
     parser.add_argument('--env', dest='env_name', help='environment tag name', type=str)
     parser.add_argument('-l', '--lambdas', dest='lmbda', help='# of lambdas for DiffCo kernel', type=int, default=10)
+    parser.add_argument('--train-all', action='store_true', default=False)
+    parser.add_argument('--keep-all', action='store_true', default=False)
+    parser.add_argument('--fitting-target', choices=['label', 'dist', 'hypo'], default='label')
+    parser.add_argument('--fitting-epsilon', type=float, default=0.01)
+    parser.add_argument('-k', '--kernel-type', choices=['polyharmonic', 'multiquadratic'], default='polyharmonic')
+    parser.add_argument('--fit-full-poly', action='store_true', default=False)
+    parser.add_argument('--scoring-method', choices=['rbf_score', 'poly_score', 'score'], default='rbf_score')
+    parser.add_argument('--safety_margin', type=int, default=0)
     args = parser.parse_args()
-    if not args.filename:
+
+    # Set checker
+    if args.checker_type == 'DiffCo':
+        args.checker_type = DiffCo
+    elif args.checker_type == 'MultiDiffCo':
+        args.checker_type = MultiDiffCo
+    
+    # Set kernel func
+    if args.kernel_type == 'polyharmonic':
+        args.kernel_type = kernel.Polyharmonic
+    elif args.kernel_type == 'multiquadratic':
+        args.kernel_type = kernel.MultiQuadratic
+
+    if not args.dataset_filepath:
         if not args.DOF or not args.env_name:
             parser.error('without dataset, both --dof and --env are required')
+    # print(vars(args))
     main(**vars(args))
