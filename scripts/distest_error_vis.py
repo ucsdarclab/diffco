@@ -162,6 +162,7 @@ def main(
         dataset_filepath: str = None,
         lmbda=10,
         keep_all: bool = False,
+        use_fk: bool = True,
         fitting_target: str = 'label',
         fitting_epsilon: float = 0.01,
         kernel_type: kernel.KernelFunc = kernel.Polyharmonic,
@@ -192,6 +193,7 @@ def main(
     keep_all (bool): Argument for training the collision checker. When False
         (default), support points are filtered. When True, all support points
         are kept.
+    use_fk (bool): Flag for using forward kinematics or not. Defaults to True.
     fitting_target (str): The fitting target. Must be one of the following:
         'label', 'dist', or 'hypo'. Defaults to 'label'.
     fitting_epsilon (float): Argument passed to the checker's fit function.
@@ -230,14 +232,15 @@ def main(
     shuffled_indices = torch.LongTensor(np.random.choice(len(cfgs), len(cfgs), replace=False))
     train_indices = shuffled_indices[:train_num]
     test_indices = shuffled_indices[train_num:]
-    fkine = robot.fkine
+    fkine = robot.fkine if use_fk else None
 
     if pretrained_checker:
         with open(pretrained_checker, 'rb') as f:
             checker = pickle.load(f)
             print('checker loaded: {}'.format(f.name))
     else:
-        checker = checker_type(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(lmbda)), beta=1.0) 
+        kernel_func = kernel.FKKernel(fkine, kernel.RQKernel(lmbda)) if use_fk else kernel.RQKernel(lmbda)
+        checker = checker_type(obstacles, kernel_func=kernel_func, beta=1.0) 
         checker.train(cfgs[train_indices], labels[train_indices], max_iteration=len(cfgs[train_indices]), distance=dists[train_indices],
                 keep_all=keep_all)
         os.makedirs('results', exist_ok=True)
@@ -400,6 +403,7 @@ if __name__ == "__main__":
     parser.add_argument('--env', dest='env_name', help='environment tag name', type=str)
     parser.add_argument('-l', '--lambdas', dest='lmbda', help='# of lambdas for DiffCo kernel', type=int, default=10)
     parser.add_argument('--keep-all', action='store_true', default=False)
+    parser.add_argument('--no-fk', dest='use_fk', action='store_false', default=True)
     parser.add_argument('--fitting-target', choices=['label', 'dist', 'hypo'], default='label')
     parser.add_argument('--fitting-epsilon', type=float, default=0.01)
     parser.add_argument('-k', '--kernel-type', choices=['polyharmonic', 'multiquadratic'], default='polyharmonic')
