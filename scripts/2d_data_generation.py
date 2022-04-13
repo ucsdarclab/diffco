@@ -7,7 +7,7 @@ from diffco.model import RevolutePlanarRobot
 from generate_batch_data_2d import generate_data_planar_manipulators
 
 
-obstacles = {
+predefined_obstacles = {
     # ('circle', (3, 2), 2), #2circle
     # ('circle', (-2, 3), 0.5), #2circle
     # ('rect', (-2, 3), (1, 1)),
@@ -93,7 +93,7 @@ def main(
 
         link_length = 2.5
     else:
-        obstacles = obstacles[env_name]
+        obstacles = predefined_obstacles[env_name]
         lengths = {2: 3.5, 3: 2, 7:1}
         link_length = lengths[dof]
     
@@ -112,7 +112,7 @@ if __name__ == "__main__":
     parser.add_argument('-o', '--output-dir', dest='folder', default='data/landscape')
     parser.add_argument('-l', '--label-type', choices=['instance', 'class', 'binary'], default='binary')
     parser.add_argument('-n', '--num-classes', dest='num_class', default=2, type=int)
-    parser.add_argument('-d', '--dof', help='degrees of freedom', choices=[2, 3, 7], default=3)
+    parser.add_argument('-d', '--dof', help='degrees of freedom', choices=[2, 3, 7], default=3, type=int)
     parser.add_argument('-i', '--num-init-points', type=int, default=8000)
     parser.add_argument('-w', '--width', help='link width', type=float, default=0.3)
     parser.add_argument('-r', '--random-seed', type=int, default=2021)
