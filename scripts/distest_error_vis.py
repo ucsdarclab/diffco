@@ -161,7 +161,6 @@ def main(
         env_name: str = None,
         dataset_filepath: str = None,
         lmbda=10,
-        train_all: bool = False,
         keep_all: bool = False,
         fitting_target: str = 'label',
         fitting_epsilon: float = 0.01,
@@ -189,8 +188,6 @@ def main(
         DOF and env_name must be provided.
     lmbda (int): Argument passed to RQKernel when training a new collision
         checker. Defaults to 10.
-    train_all (bool): When True, train on all the data. When False, train on
-        just the training set. Defaults to False.
     keep_all (bool): Argument for training the collision checker. When False
         (default), support points are filtered. When True, all support points
         are kept.
@@ -223,7 +220,9 @@ def main(
     else:
         robot = dataset['robot']()
     train_num = 6000
-    indices = torch.LongTensor(np.random.choice(len(cfgs), train_num, replace=False))
+    shuffled_indices = torch.LongTensor(np.random.choice(len(cfgs), len(cfgs), replace=False))
+    train_indices = shuffled_indices[:train_num]
+    test_indices = shuffled_indices[train_num:]
     fkine = robot.fkine
 
     if pretrained_checker:
@@ -232,11 +231,7 @@ def main(
             print('checker loaded: {}'.format(f.name))
     else:
         checker = checker_type(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(lmbda)), beta=1.0) 
-        if train_all:
-            checker.train(cfgs[indices], labels[indices], max_iteration=len(cfgs[indices]), distance=dists[indices],
-                keep_all=keep_all)
-        else:
-            checker.train(cfgs[:train_num], labels[:train_num], max_iteration=len(cfgs[:train_num]), distance=dists[:train_num],
+        checker.train(cfgs[train_indices], labels[train_indices], max_iteration=len(cfgs[train_indices]), distance=dists[train_indices],
                 keep_all=keep_all)
         os.makedirs('results', exist_ok=True)
         with open('results/checker_errvis.p', 'wb') as f:
@@ -262,9 +257,8 @@ def main(
         raise NotImplementedError(scoring_method)
 
     # Check DiffCo test ACC
-    test_num = len(cfgs) - train_num
-    test_preds = (dist_est(cfgs[train_num:train_num+test_num])-safety_margin > 0) * 2 - 1
-    test_labels = labels[train_num:].reshape(test_preds.shape)
+    test_preds = (dist_est(cfgs[test_indices])-safety_margin > 0) * 2 - 1
+    test_labels = labels[test_indices].reshape(test_preds.shape)
     test_acc = torch.sum(test_preds == test_labels, dtype=torch.float32)/len(test_preds.view(-1))
     test_tpr = torch.sum(test_preds[test_labels ==1] == 1, dtype=torch.float32) / len(test_preds[test_labels ==1])
     test_tnr = torch.sum(test_preds[test_labels ==-1] == -1, dtype=torch.float32) / len(test_preds[test_labels==-1])
@@ -284,7 +278,7 @@ def main(
         obstacles, 
         kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), 
         rbf_kernel=kernel.Polyharmonic(1, epsilon=1)) #kernel.Polyharmonic(1, epsilon=1)) kernel.MultiQuadratic(epsilon=1)
-    checker.train(cfgs[:train_num], dists[:train_num], fkine=fkine, max_iteration=int(1e4), n_left_out_points=300, dtol=1e-1)
+    checker.train(cfgs[train_indices], dists[train_indices], fkine=fkine, max_iteration=int(1e4), n_left_out_points=300, dtol=1e-1)
     checker.gains = checker.gains.reshape(-1, 1)
     dist_est = checker.rbf_score
 
@@ -315,11 +309,11 @@ def main(
     # size = [400, 400]
     # yy, xx = torch.meshgrid(torch.linspace(-np.pi, np.pi, size[0]), torch.linspace(-np.pi, np.pi, size[1]))
     # grid_points = torch.stack([xx, yy], axis=2).reshape((-1, 2))
-    est_grid = dist_est(cfgs[train_num:])
+    est_grid = dist_est(cfgs[train_indices])
     # est_grid = dist_est(checker.support_points)
 
     # indices = np.random.choice(range(len(est_grid)), size=400, replace=False)
-    gt_grid = gt_grid[train_num:]
+    gt_grid = gt_grid[train_indices]
     # est_grid = est_grid[indices]
 
     fig = plt.figure(figsize=(5, 5)) # temp
@@ -398,7 +392,6 @@ if __name__ == "__main__":
     parser.add_argument('--dof', dest='DOF', help='degrees of freedom', type=int)
     parser.add_argument('--env', dest='env_name', help='environment tag name', type=str)
     parser.add_argument('-l', '--lambdas', dest='lmbda', help='# of lambdas for DiffCo kernel', type=int, default=10)
-    parser.add_argument('--train-all', action='store_true', default=False)
     parser.add_argument('--keep-all', action='store_true', default=False)
     parser.add_argument('--fitting-target', choices=['label', 'dist', 'hypo'], default='label')
     parser.add_argument('--fitting-epsilon', type=float, default=0.01)
