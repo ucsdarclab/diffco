@@ -3,6 +3,7 @@ This is a script that comprises several small experiments/demos in the paper.
 The best to use this is to comment/uncomment certain lines depending on the purpose.
 '''
 
+import os
 import sys
 import json
 import pickle
@@ -182,6 +183,7 @@ def main(DOF=None, env_name=None, filename=None, lmbda=10):
     #         keep_all=keep_all)
     checker.train(cfgs[:train_num], labels[:train_num], max_iteration=len(cfgs[:train_num]), distance=dists[:train_num],
         keep_all=keep_all)
+    os.makedirs('results', exist_ok=True)
     with open('results/checker_errvis.p', 'wb') as f:
         pickle.dump(checker, f)
         print('checker saved: {}'.format(f.name))
@@ -298,6 +300,7 @@ def main(DOF=None, env_name=None, filename=None, lmbda=10):
     # plt.show()
     # plt.savefig('figs/correlation/training_{}dof_{}_{}_{}ransample_rsquare.png'.format(DOF, env_name, 'hybriddiffco', checker.n_left_out_points))
     # plt.savefig('figs/correlation/{}dof_{}_{}.pdf'.format(DOF, env_name, fitting_target))#, dpi=500)
+    os.makedirs('figs/correlation', exist_ok=True)
     plt.savefig('figs/correlation/{}dof_{}_{}_{}.png'.format(DOF, env_name, fitting_target, 'woFK' if checker.fkine is None else 'withFK'), dpi=300)
     
     # ''' 
