@@ -19,7 +19,9 @@ predefined_obstacles = {
         ('circle', (-4, -3), 1)],
     # ('rect', (4, 3), (2, 2)), # 2rect
     # ('rect', (-4, -3), (2, 2)) # 2rect
-    # ('rect', (3, 2), (2, 2)) # 1rect
+    '1rect': [
+        ('rect', (3, 2), (2, 2)) # 1rect
+    ],
     '3circle': [
         ('circle', (0, 4.5), 1), #3circle
         ('circle', (-2, -3), 2), #3circle
@@ -107,7 +109,8 @@ if __name__ == "__main__":
     desc = '2D data generation'
     parser = argparse.ArgumentParser(description=desc)
     env_choices = ['1rect_1circle', '3circle', '1rect_1circle_7d', '2class_1',
-                   '2class_2', '3circle_7d', '7d_narrow', '3d_halfnarrow']
+                   '2class_2', '3circle_7d', '7d_narrow', '3d_halfnarrow',
+                   '1rect']
     parser.add_argument('--env', dest='env_name', help='2D environment', choices=env_choices, default='3d_halfnarrow')
     parser.add_argument('-o', '--output-dir', dest='folder', default='data/landscape')
     parser.add_argument('-l', '--label-type', choices=['instance', 'class', 'binary'], default='binary')
