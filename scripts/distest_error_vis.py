@@ -6,12 +6,14 @@ The best to use this is to comment/uncomment certain lines depending on the purp
 import argparse
 import os
 import pickle
+from typing import Callable, Tuple, Union
 
 import matplotlib.patheffects as path_effects
 import numpy as np
 import seaborn as sns
 import torch
-from diffco import DiffCo, MultiDiffCo, kernel, CollisionChecker
+from diffco import CollisionChecker, DiffCo, MultiDiffCo, kernel
+from diffco.model import Model
 from matplotlib import pyplot as plt
 from matplotlib.patches import Circle, Rectangle
 from scipy import ndimage
@@ -155,67 +157,118 @@ def train():
     pass
 
 def main(
-        checker_type: CollisionChecker = DiffCo,
+        DOF: int,
+        env_name: str,
+        dataset_filepath: str,
+        checker_type: CollisionChecker,
+        lmbda: int,
+        keep_all: bool,
+        use_fk: bool,
+        kernel_type: kernel.KernelFunc,
+        fit_full_poly: bool,
+        fitting_target: str,
+        fitting_epsilon: float,
+        scoring_method: str,
+        safety_margin: int,
         pretrained_checker: str = None,
-        DOF: int = None,
-        env_name: str = None,
-        dataset_filepath: str = None,
-        lmbda=10,
-        keep_all: bool = False,
-        use_fk: bool = True,
-        fitting_target: str = 'label',
-        fitting_epsilon: float = 0.01,
-        kernel_type: kernel.KernelFunc = kernel.Polyharmonic,
-        fit_full_poly: bool = False,
-        scoring_method: str = 'rbf_score',
-        safety_margin: int = 0,
-        random_seed: int = None):
-    """Run experiment.
+        random_seed: int = None) -> None:
+    """Main entry point for the script. Trains/loads checker, calculates
+    correlation, and compares different configurations.
 
-    checker_type (CollisionChecker): The collision checker class (defaults to
-        DiffCo).
-    pretrained_checker (str): Path to a pretrained collision checker. If
-        provided, the training phase is skipped and the pretrained checker is
-        used instead (may provide a speedup). If None (default), a new collision
-        checker is trained and saved.
-    DOF (int): Robot's degrees of freedom. Used to identify the dataset file if
-        the path to the dataset is not provided. (Should deprecate in favor of
-        requiring dataset filepath?) Defaults to None, but if a dataset filename
-        is not provided, DOF must be provided.
-    env_name (str): Dataset environment nickname. Used to identify the dataset
-        file if the path to the dataset is not provided. (Should deprecate in
-        favor of requiring dataset filepath?) Defaults to None, but if a dataset
-        filename is not provided, env_name must be provided.
-    dataset_filepath (str): Path to dataset. Defaults to None, in which case
-        DOF and env_name must be provided.
-    lmbda (int): Argument passed to RQKernel when training a new collision
-        checker. Defaults to 10.
-    keep_all (bool): Argument for training the collision checker. When False
-        (default), support points are filtered. When True, all support points
-        are kept.
-    use_fk (bool): Flag for using forward kinematics or not. Defaults to True.
-    fitting_target (str): The fitting target. Must be one of the following:
-        'label', 'dist', or 'hypo'. Defaults to 'label'.
-    fitting_epsilon (float): Argument passed to the checker's fit function.
-        Defaults to 0.01.
-    kernel_type (str): The type of kernel function to use when fit_full_poly is
-        False. Currently supported kernel types are Polyharmonic and
-        MultiQuadratic.
-    fit_full_poly (bool): When True, uses the collision checkers fit_full_poly
-        fitting function. When False (default), uses the fit_poly fitting
-        function.
-    scoring_method (str): Scoring method for the collision checker. Supported
-        scoring methods are 'rbf_score', 'poly_score', and 'score'. Defaults to
-        'rbf_score'.
-    safety_margin (int): Amount to offset test predictions by when running the
-        scoring method. Defaults to 0.
-    random_seed (int): Random seed used to reproduce the same results, useful
-        for debugging. Defaults to None
+    Args:
+        DOF (int): Robot's degrees of freedom. Used to identify the dataset file
+            if the path to the dataset is not provided. (Should deprecate in
+            favor of requiring dataset filepath?) Defaults to None, but if a
+            dataset filename is not provided, DOF must be provided.
+        env_name (str): Dataset environment nickname. Used to identify the
+            dataset file if the path to the dataset is not provided. (Should
+            deprecate in favor of requiring dataset filepath?) Defaults to None,
+            but if a dataset filename is not provided, env_name must be
+            provided.
+        dataset_filepath (str): Path to dataset. Defaults to None, in which case
+            DOF and env_name must be provided.
+        checker_type (CollisionChecker): The collision checker class (defaults
+            to DiffCo).
+        lmbda (int): Argument passed to RQKernel when training a new collision
+            checker. Defaults to 10.
+        keep_all (bool): Argument for training the collision checker. When False
+            (default), support points are filtered. When True, all support
+            points are kept.
+        use_fk (bool): Flag for using forward kinematics or not. Defaults to
+            True.
+        kernel_type (KernelFunc): The type of kernel function to use when
+            fit_full_poly is False. Currently supported kernel types are
+            Polyharmonic and MultiQuadratic.
+        fit_full_poly (bool): When True, uses the collision checkers
+            fit_full_poly fitting function. When False (default), uses the
+            fit_poly fitting function.
+        fitting_target (str): The fitting target. Must be one of the following:
+            'label', 'dist', or 'hypo'. Defaults to 'label'.
+        fitting_epsilon (float): Argument passed to the checker's fit function.
+            Defaults to 0.01.
+        scoring_method (str): Scoring method for the collision checker.
+            Supported scoring methods are 'rbf_score', 'poly_score', and
+            'score'. Defaults to 'rbf_score'.
+        safety_margin (int): Amount to offset test predictions by when running
+            the scoring method. Defaults to 0.
+        pretrained_checker (str): Path to a pretrained collision checker. If
+            provided, the training phase is skipped and the pretrained checker
+            is used instead (may provide a speedup).
+        random_seed (int): Random seed used to reproduce the same results,
+            useful for debugging. Defaults to None.
+    Returns:
+        None
     """
     if random_seed:
         torch.manual_seed(random_seed)
         np.random.seed(random_seed)
+    robot, cfgs, labels, dists, obstacles = unpack_dataset(env_name, DOF, dataset_filepath)
+    fkine = robot.fkine if use_fk else None
+    train_indices, test_indices = train_test_split(len(cfgs), int(0.75 * len(cfgs)))
+    if pretrained_checker:
+        checker = load_pretrained_checker(pretrained_checker)
+    else:
+        checker = train_checker(checker_type, cfgs[train_indices], labels[train_indices], dists[train_indices], fkine, obstacles, lmbda, keep_all)
+    fit_checker(checker, kernel_type, fit_full_poly, fitting_target, fitting_epsilon, fkine)
+    dist_est = get_estimator(checker, scoring_method)
+    test_checker(checker, dist_est, cfgs[test_indices], labels[test_indices], safety_margin)
 
+    # Correlation
+    correlation_filename = f'{DOF}dof_{env_name}_{fitting_target}_{"woFK" if checker.fkine is None else "withFK"}.png'
+    gt_grid = dists[test_indices]
+    est_grid = dist_est(cfgs[test_indices])
+    correlation(gt_grid, est_grid, correlation_filename)
+    test_error(gt_grid, est_grid)
+
+    # Compare
+    compare(checker, robot, obstacles, cfgs, dists, dist_est)
+
+def unpack_dataset(
+        env_name: str = None,
+        DOF: int = None,
+        dataset_filepath: str = None) -> Tuple[Model, torch.Tensor, torch.Tensor, torch.Tensor, list]:
+    """Load and unpack the dataset from file.
+
+    Args:
+        env_name (str): Dataset environment nickname. Used to identify the
+            dataset file if the path to the dataset is not provided. (Should
+            deprecate in favor of requiring dataset filepath?) Defaults to None,
+            but if a dataset filename is not provided, env_name must be
+            provided.
+        DOF (int): Robot's degrees of freedom. Used to identify the dataset file
+            if the path to the dataset is not provided. (Should deprecate in
+            favor of requiring dataset filepath?) Defaults to None, but if a
+            dataset filename is not provided, DOF must be provided.
+        dataset_filepath (str): Path to dataset. Defaults to None, in which case
+            DOF and env_name must be provided.
+    
+    Returns:
+        diffco.model.Model: The robot model.
+        torch.Tensor: The dataset "data".
+        torch.Tensor: The labels.
+        torch.Tensor: The dists.
+        list: The obstacles.
+    """
     if env_name:
         dataset = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name))
     elif dataset_filepath:
@@ -228,25 +281,99 @@ def main(
         robot = dataset['robot'](*dataset['rparam'])
     else:
         robot = dataset['robot']()
-    train_num = 6000
-    shuffled_indices = torch.LongTensor(np.random.choice(len(cfgs), len(cfgs), replace=False))
-    train_indices = shuffled_indices[:train_num]
-    test_indices = shuffled_indices[train_num:]
-    fkine = robot.fkine if use_fk else None
+    return robot, cfgs, labels, dists, obstacles
 
-    if pretrained_checker:
-        with open(pretrained_checker, 'rb') as f:
-            checker = pickle.load(f)
-            print('checker loaded: {}'.format(f.name))
-    else:
-        kernel_func = kernel.FKKernel(fkine, kernel.RQKernel(lmbda)) if use_fk else kernel.RQKernel(lmbda)
-        checker = checker_type(obstacles, kernel_func=kernel_func, beta=1.0) 
-        checker.train(cfgs[train_indices], labels[train_indices], max_iteration=len(cfgs[train_indices]), distance=dists[train_indices],
-                keep_all=keep_all)
-        os.makedirs('results', exist_ok=True)
-        with open('results/checker_errvis.p', 'wb') as f:
-            pickle.dump(checker, f)
-            print('checker saved: {}'.format(f.name))
+def train_test_split(total_size: int, training_size: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Create indices for shuffling and splitting data into training/test sets.
+
+    Args:
+        total_size (int): The size of the dataset.
+        training_size (int): The number of desired training data (test set size
+            is total_size - training_size).
+    
+    Returns:
+        torch.Tensor: The training set indices.
+        torch.Tensor: The test set indices.
+    """
+    shuffled_indices = torch.LongTensor(np.random.choice(total_size, total_size, replace=False))
+    train_indices = shuffled_indices[:training_size]
+    test_indices = shuffled_indices[training_size:]
+    return train_indices, test_indices
+
+def load_pretrained_checker(filepath: str) -> CollisionChecker:
+    """If provided, the training phase is skipped and the pretrained checker is
+    used instead (may provide a speedup).
+
+    Args:
+        filepath (str): Path to a pretrained collision checker.
+    
+    Returns:
+        diffco.CollisionChecker: The pretrained checker.
+    """
+    with open(filepath, 'rb') as f:
+        checker = pickle.load(f)
+        print('checker loaded: {}'.format(f.name))
+    return checker
+
+def train_checker(
+        checker_type: CollisionChecker,
+        train_data: torch.Tensor,
+        train_labels: torch.Tensor,
+        train_dists: torch.Tensor,
+        fkine: Union[Callable, None],
+        obstacles: list,
+        lmbda=10,
+        keep_all: bool = False) -> CollisionChecker:
+    """Train a collision checker.
+
+    Args:
+        checker_type (CollisionChecker): The collision checker class.
+        train_data (torch.Tensor): The training data.
+        train_labels (torch.Tensor): The training data labels.
+        train_dists (torch.Tensor): The training data dists.
+        fkine (Callable | None): The forward kinematics method (could be None).
+        obstacles: The obstacles.
+        lmbda (int): Argument passed to RQKernel when training a new collision
+            checker. Defaults to 10.
+        keep_all (bool): Argument for training the collision checker. When False
+            (default), support points are filtered. When True, all support
+            points are kept.
+    
+    Returns:
+        diffco.CollisionChecker: The trained collision checker.
+    """
+    kernel_func = kernel.FKKernel(fkine, kernel.RQKernel(lmbda)) if fkine is not None else kernel.RQKernel(lmbda)
+    checker = checker_type(obstacles, kernel_func=kernel_func, beta=1.0) 
+    checker.train(train_data, train_labels, max_iteration=len(train_data), distance=train_dists, keep_all=keep_all)
+    os.makedirs('results', exist_ok=True)
+    with open('results/checker_errvis.p', 'wb') as f:
+        pickle.dump(checker, f)
+        print('checker saved: {}'.format(f.name))
+    return checker
+
+def fit_checker(
+        checker: CollisionChecker,
+        kernel_type: kernel.KernelFunc = kernel.Polyharmonic,
+        fit_full_poly: bool = False,
+        fitting_target: str = 'label',
+        fitting_epsilon: float = 0.01,
+        fkine: Callable = None) -> None:
+    """Fit the collision checker.
+
+    Args:
+        checker (CollisionChecker): The trained collision checker.
+        kernel_type (KernelFunc): The type of kernel function to use when
+            fit_full_poly is False. Currently supported kernel types are
+            Polyharmonic and MultiQuadratic.
+        fit_full_poly (bool): When True, uses the collision checkers
+            fit_full_poly fitting function. When False (default), uses the
+            fit_poly fitting function.
+        fitting_target (str): The fitting target. Must be one of the following:
+            'label', 'dist', or 'hypo'. Defaults to 'label'.
+        fitting_epsilon (float): Argument passed to the checker's fit function.
+            Defaults to 0.01.
+        fkine (Callable): The forward kinematics method (defaults to None).
+    """
     if fit_full_poly:
         checker.fit_full_poly(epsilon=fitting_epsilon, k=3, target=fitting_target, fkine=fkine)
     else:
@@ -257,75 +384,59 @@ def main(
         else:
             raise NotImplementedError(kernel_type)
         checker.fit_poly(kernel_func=kernel_func, target=fitting_target, fkine=fkine)
-    if scoring_method == 'rbf_score':
-        dist_est = checker.rbf_score
-    elif scoring_method == 'poly_score':
-        dist_est = checker.poly_score
-    elif scoring_method == 'score':
-        dist_est = checker.score
-    else:
-        raise NotImplementedError(scoring_method)
 
+def get_estimator(checker: CollisionChecker, scoring_method: str = 'rbf_score') -> Callable:
+    """Get estimator using the desired scoring method.
+
+    Args:
+        checker (CollisionChecker): The trained collision checker.
+        scoring_method (str): Scoring method for the collision checker.
+            Supported scoring methods are 'rbf_score', 'poly_score', and
+            'score'. Defaults to 'rbf_score'.
+    Returns:
+        Callable: The corresponding scoring method.
+    """
+    if scoring_method == 'rbf_score':
+        return checker.rbf_score
+    if scoring_method == 'poly_score':
+        return checker.poly_score
+    if scoring_method == 'score':
+        return checker.score
+    raise NotImplementedError(scoring_method)
+
+def test_checker(
+        checker: CollisionChecker,
+        dist_est: Callable,
+        test_data: torch.Tensor,
+        test_labels: torch.Tensor,
+        safety_margin: int = 0) -> None:
+    """Run a trained collision checker on the test set and print results.
+
+    Args:
+        checker (CollisionChecker): The trained collision checker.
+        dist_est (Callable): The distance estimator function.
+        test_data (torch.Tensor): The test set data.
+        test_labels (torch.Tensor): The test set labels.
+        safety_margin (int): Amount to offset test predictions by when running
+            the scoring method. Defaults to 0.
+    """
     # Check DiffCo test ACC
-    test_preds = (dist_est(cfgs[test_indices])-safety_margin > 0) * 2 - 1
-    test_labels = labels[test_indices].reshape(test_preds.shape)
+    test_preds = (dist_est(test_data)-safety_margin > 0) * 2 - 1
+    test_labels = test_labels.reshape(test_preds.shape)
     test_acc = torch.sum(test_preds == test_labels, dtype=torch.float32)/len(test_preds.view(-1))
     test_tpr = torch.sum(test_preds[test_labels ==1] == 1, dtype=torch.float32) / len(test_preds[test_labels ==1])
     test_tnr = torch.sum(test_preds[test_labels ==-1] == -1, dtype=torch.float32) / len(test_preds[test_labels==-1])
     print('Test acc: {}, TPR {}, TNR {}'.format(test_acc, test_tpr, test_tnr))
     print(len(checker.gains), 'Support Points')
-    
-    '''# =============== test error ============
-    # est = est / est.std() * gt_grid.std()
-    # print('{:.4f}, {:.4f}, {:.4f}'.format(
-    #     (est-gt_grid).mean(), (est-gt_grid).std(), gt_grid.std()))
-    '''
-    
-    ''' diffco 3-figure compare (work, c space 1, c space 2)==========
-    from diffco import DiffCo
 
-    checker = DiffCo(
-        obstacles, 
-        kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), 
-        rbf_kernel=kernel.Polyharmonic(1, epsilon=1)) #kernel.Polyharmonic(1, epsilon=1)) kernel.MultiQuadratic(epsilon=1)
-    checker.train(cfgs[train_indices], dists[train_indices], fkine=fkine, max_iteration=int(1e4), n_left_out_points=300, dtol=1e-1)
-    checker.gains = checker.gains.reshape(-1, 1)
-    dist_est = checker.rbf_score
+def correlation(gt_grid: torch.Tensor, est_grid: torch.Tensor, output_filename: str) -> None:
+    """Calculate and plot correlation.
 
-    size = [400, 400]
-    env_name_gt = env_name if 'compare' in env_name else env_name+'_for_compare'
-    gt_grid = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name_gt))['dist']
-    grid_points = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name_gt))['data']
-    raw_grid_score = checker.rbf_score(grid_points)
-    raw_grid_score = torch.from_numpy(ndimage.gaussian_filter(raw_grid_score, 1))
-
-    use3d = False
-    dpi=100
-    est, c_axes = create_plots(robot, obstacles, checker.rbf_score, gt_grid, use3d=use3d) # raw_grid_score)#gt_grid)
-    c_support_points = checker.support_points
-    c_axes[1].scatter(c_support_points[:, 0], c_support_points[:, 1], marker='.', c='black', s=1.5)
-    plt.tight_layout()
-    plt.show()
-    # plt.savefig('figs/original_DiffCo_score_compared_{}_dpi{}.jpg'.format('3d' if use3d else '2d', dpi), dpi=dpi, bbox_inches='tight')
-    # plt.savefig('figs/robot_gallery/2d_{}dof_{}.jpg'.format(DOF, env_name), dpi=dpi, bbox_inches='tight')
-    # plt.savefig('figs/vis_{}.png'.format(env_name), dpi=500)
-    # plt.savefig('figs/new_diffco_vis.png')
-    ''' #===============================
-
-    # ''' =============== correlation ==============
-    gt_grid = dists
-    # gt_grid = checker.distance
-
-    # size = [400, 400]
-    # yy, xx = torch.meshgrid(torch.linspace(-np.pi, np.pi, size[0]), torch.linspace(-np.pi, np.pi, size[1]))
-    # grid_points = torch.stack([xx, yy], axis=2).reshape((-1, 2))
-    est_grid = dist_est(cfgs[train_indices])
-    # est_grid = dist_est(checker.support_points)
-
-    # indices = np.random.choice(range(len(est_grid)), size=400, replace=False)
-    gt_grid = gt_grid[train_indices]
-    # est_grid = est_grid[indices]
-
+    Args:
+        gt_grid (torch.Tensor): The ground truth grid.
+        est_grid (torch.Tensor): The output from the distance estimator.
+        output_filename (str): The desired filename of the output figure.
+    """
     fig = plt.figure(figsize=(5, 5)) # temp
     plt.rcParams.update({
         "text.usetex": True,
@@ -348,48 +459,99 @@ def main(
     # ax.spines['left'].set_position('center')
     # ax.spines['bottom'].set_position('center')
 
-    # from scipy import stats
-    # slope, intercept, r_value, p_value, std_err = stats.linregress(est_grid.numpy().reshape(-1), gt_grid.numpy().reshape(-1))
-    # print('{}DOF, environment {}, with FK {}, r-squared: {}'.format(DOF, env_name, checker.fkine is not None, r_value**2))
-    # ax.text(xlim_max/4, -7*ylim_max/8, '$\\mathrm{R}^2='+('{:.4f}$'.format(r_value**2)), fontsize=15, 
-    #     bbox=dict(boxstyle='round', facecolor='wheat', alpha=1))
-    # ax.set_title('{} original supports, {} random samples'.format(checker.num_origin_supports, checker.n_left_out_points))
-
-    # plt.show()
-    # plt.savefig('figs/correlation/training_{}dof_{}_{}_{}ransample_rsquare.png'.format(DOF, env_name, 'hybriddiffco', checker.n_left_out_points))
     # plt.savefig('figs/correlation/{}dof_{}_{}.pdf'.format(DOF, env_name, fitting_target))#, dpi=500)
     os.makedirs('figs/correlation', exist_ok=True)
-    plt.savefig('figs/correlation/{}dof_{}_{}_{}.png'.format(DOF, env_name, fitting_target, 'woFK' if checker.fkine is None else 'withFK'), dpi=300)
+    plt.savefig(f'figs/correlation/{output_filename}', dpi=300)
+
+
+def test_error(gt_grid: torch.Tensor, est: torch.Tensor) -> None:
+    """Calculate error for the test set.
     
-    # ''' 
+    Args:
+        gt_grid (torch.Tensor): The ground truth data.
+        est (torch.Tensor): The output from the collision checker estimator for
+            the data from the test set.
+    """
+    est = est / est.std() * gt_grid.std()
+    print('{:.4f}, {:.4f}, {:.4f}'.format(
+        (est-gt_grid).mean(), (est-gt_grid).std(), gt_grid.std()))
 
-    ''' timing
-    # times = []
-    # st = time()
-    # # for i, cfg in enumerate(cfgs):
-    # #     st1 = time()
-    # #     dist_est(cfg)
-    # #     end1 = time()
-    # #     times.append(end1-st1)
-    # dist_est(cfgs)
-    # end = time()
-    # times = np.array(times)
-    # print('std: {}, mean {}, avg {}'.format(times.std(), times.mean(), (end-st)/len(cfgs)))
-    '''
 
-    ''' decomposition
+def compare(
+        checker: CollisionChecker,
+        robot: Model,
+        obstacles: list,
+        cfgs: torch.Tensor,
+        dists: torch.Tensor,
+        dist_est: Callable) -> None:
+    """Create 3 figures to compare the workspace and two configuration spaces
+    for a 2 DOF robot.
+    
+    Args:
+        checker (CollisionChecker): The trained collision checker.
+        robot (Model): The 2 DOF robot from the dataset.
+        obstacles (list): The obstacles from the dataset.
+        cfgs (torch.Tensor): The data.
+        dists (torch.Tensor): The dists.
+        dist_est (Callable): The distance estimator function.
+    """
+    # diffco 3-figure compare (work, c space 1, c space 2)==========
+    checker.gains = checker.gains.reshape(-1, 1)
+
+    raw_grid_score = dist_est(cfgs)
+    raw_grid_score = torch.from_numpy(ndimage.gaussian_filter(raw_grid_score, 1))
+
+    use3d = False
+    dpi=100
+    # est, c_axes = create_plots(robot, obstacles, dist_est, dists, use3d=use3d) # raw_grid_score)#gt_grid)
+    est, c_axes = create_plots(robot, obstacles, dist_est, raw_grid_score, use3d=use3d) # raw_grid_score)#gt_grid)
+    c_support_points = checker.support_points
+    c_axes[1].scatter(c_support_points[:, 0], c_support_points[:, 1], marker='.', c='black', s=1.5)
+    plt.tight_layout()
+    # plt.show()
+    # plt.savefig('figs/original_DiffCo_score_compared_{}_dpi{}.jpg'.format('3d' if use3d else '2d', dpi), dpi=dpi, bbox_inches='tight')
+    # plt.savefig('figs/robot_gallery/2d_{}dof_{}.jpg'.format(DOF, env_name), dpi=dpi, bbox_inches='tight')
+    # plt.savefig('figs/vis_{}.png'.format(env_name), dpi=500)
+    plt.savefig('figs/test_output.png', dpi=500)
+    # plt.savefig('figs/new_diffco_vis.png')
+
+
+def plot_r_squared():
+    raise NotImplementedError
+    from scipy import stats
+    slope, intercept, r_value, p_value, std_err = stats.linregress(est_grid.numpy().reshape(-1), gt_grid.numpy().reshape(-1))
+    print('{}DOF, environment {}, with FK {}, r-squared: {}'.format(DOF, env_name, checker.fkine is not None, r_value**2))
+    ax.text(xlim_max/4, -7*ylim_max/8, '$\\mathrm{R}^2='+('{:.4f}$'.format(r_value**2)), fontsize=15, 
+        bbox=dict(boxstyle='round', facecolor='wheat', alpha=1))
+    ax.set_title('{} original supports, {} random samples'.format(checker.num_origin_supports, checker.n_left_out_points))
+
+    plt.show()
+    plt.savefig('figs/correlation/training_{}dof_{}_{}_{}ransample_rsquare.png'.format(DOF, env_name, 'hybriddiffco', checker.n_left_out_points))
+    return r_value ** 2
+
+
+def timing():
+    raise NotImplementedError
+    times = []
+    st = time()
+    for i, cfg in enumerate(cfgs):
+        st1 = time()
+        dist_est(cfg)
+        end1 = time()
+        times.append(end1-st1)
+    dist_est(cfgs)
+    end = time()
+    times = np.array(times)
+    print('std: {}, mean {}, avg {}'.format(times.std(), times.mean(), (end-st)/len(cfgs)))
+
+
+def decomposition():
+    raise NotImplementedError
     env_name_gt = env_name if 'compare' in env_name else env_name+'_for_compare'
     gt_grid = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name_gt))['label']
-    est, c_axes = create_plots(robot, obstacles, dist_est, gt_grid) # raw_grid_score)#gt_grid)
+    est, c_axes = create_plots(robot, obstacles, dist_est, gt_grid)
     DiffCoClustering(cfgs, fkine, c_axes[0])
     plt.show()
-    '''
-    # return r_value ** 2
-
-    
-    
-
-
 
 
 if __name__ == "__main__":
@@ -428,5 +590,4 @@ if __name__ == "__main__":
     if not args.dataset_filepath:
         if not args.DOF or not args.env_name:
             parser.error('without dataset, both --dof and --env are required')
-    # print(vars(args))
     main(**vars(args))
