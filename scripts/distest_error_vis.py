@@ -178,46 +178,40 @@ def main(
     Args:
         DOF (int): Robot's degrees of freedom. Used to identify the dataset file
             if the path to the dataset is not provided. (Should deprecate in
-            favor of requiring dataset filepath?) Defaults to None, but if a
-            dataset filename is not provided, DOF must be provided.
+            favor of requiring dataset filepath?) If a dataset filename is not
+            provided, DOF must be provided.
         env_name (str): Dataset environment nickname. Used to identify the
             dataset file if the path to the dataset is not provided. (Should
-            deprecate in favor of requiring dataset filepath?) Defaults to None,
-            but if a dataset filename is not provided, env_name must be
-            provided.
-        dataset_filepath (str): Path to dataset. Defaults to None, in which case
-            DOF and env_name must be provided.
-        checker_type (CollisionChecker): The collision checker class (defaults
-            to DiffCo).
+            deprecate in favor of requiring dataset filepath?) If a dataset
+            filename is not provided, env_name must be provided.
+        dataset_filepath (str): Path to dataset. If None, DOF and env_name must
+            be provided.
+        checker_type (CollisionChecker): The collision checker class.
         lmbda (int): Argument passed to RQKernel when training a new collision
-            checker. Defaults to 10.
-        keep_all (bool): Argument for training the collision checker. When False
-            (default), support points are filtered. When True, all support
-            points are kept.
-        use_fk (bool): Flag for using forward kinematics or not. Defaults to
-            True.
+            checker.
+        keep_all (bool): Argument for training the collision checker. When
+            False, support points are filtered. When True, all support points
+            are kept.
+        use_fk (bool): Flag for using forward kinematics or not.
         kernel_type (KernelFunc): The type of kernel function to use when
             fit_full_poly is False. Currently supported kernel types are
             Polyharmonic and MultiQuadratic.
         fit_full_poly (bool): When True, uses the collision checkers
-            fit_full_poly fitting function. When False (default), uses the
-            fit_poly fitting function.
+            fit_full_poly fitting function. When False, uses the fit_poly
+            fitting function.
         fitting_target (str): The fitting target. Must be one of the following:
-            'label', 'dist', or 'hypo'. Defaults to 'label'.
+            'label', 'dist', or 'hypo'.
         fitting_epsilon (float): Argument passed to the checker's fit function.
-            Defaults to 0.01.
         scoring_method (str): Scoring method for the collision checker.
             Supported scoring methods are 'rbf_score', 'poly_score', and
-            'score'. Defaults to 'rbf_score'.
+            'score'.
         safety_margin (int): Amount to offset test predictions by when running
-            the scoring method. Defaults to 0.
+            the scoring method.
         pretrained_checker (str): Path to a pretrained collision checker. If
             provided, the training phase is skipped and the pretrained checker
             is used instead (may provide a speedup).
         random_seed (int): Random seed used to reproduce the same results,
             useful for debugging. Defaults to None.
-    Returns:
-        None
     """
     if random_seed:
         torch.manual_seed(random_seed)
