@@ -234,8 +234,10 @@ def main(
     correlation(gt_grid, est_grid, correlation_filename)
     test_error(gt_grid, est_grid)
 
-    # Compare
-    compare(checker, robot, obstacles, cfgs, dists, dist_est)
+    if robot.dof == 2:
+        compare(checker, robot, obstacles, cfgs, dists, dist_est)
+    else:
+        print(f'Expected DOF=2 to run compare(), but got DOF={robot.dof}')
 
 def unpack_dataset(
         env_name: str = None,
