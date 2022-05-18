@@ -180,7 +180,7 @@ def main(
     correlation, and compares different configurations.
 
     Args:
-        task (str): The task to perform. Must be 'correlation' or 'compare'.
+        task (str): The task to perform. Must be 'correlate' or 'compare'.
         dataset_filepath (str): Path to dataset.
         checker_type (CollisionChecker): The collision checker class.
         lmbda (int): Argument passed to RQKernel when training a new collision
@@ -223,7 +223,7 @@ def main(
     dist_est = get_estimator(checker, scoring_method)
     test_checker(checker, dist_est, cfgs[test_indices], labels[test_indices], safety_margin)
 
-    if task == 'correlation':
+    if task == 'correlate':
         description = os.path.splitext(dataset_filepath)[0]  # Remove the .pt extension
         correlation_filename = f'{description}_{fitting_target}_{"woFK" if checker.fkine is None else "withFK"}.png'
         gt_grid = dists[test_indices]
@@ -535,7 +535,7 @@ def decomposition():
 if __name__ == "__main__":
     desc = 'Tool for calculating and plotting correlation between DiffCo and FCL libraries.'
     parser = argparse.ArgumentParser(description=desc)
-    parser.add_argument('task', choices=['correlation', 'compare'])
+    parser.add_argument('task', choices=['correlate', 'compare'])
     parser.add_argument('-c', '--checker', dest='checker_type', help='Collision checker class',
         choices=['DiffCo', 'MultiDiffco'], default='DiffCo')
     parser.add_argument('--pretrained-checker', help='path to pretrained collision checker', type=str, default=None)
