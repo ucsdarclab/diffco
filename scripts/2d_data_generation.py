@@ -61,7 +61,8 @@ def main(
         dof: int = 3,
         num_init_points: int = 8000,
         random_seed: int = 2021,
-        width: float = 0.3) -> None:
+        width: float = 0.3,
+        generate_random_cfgs: bool = True) -> None:
     torch.manual_seed(random_seed)
     np.random.seed(random_seed)
 
@@ -102,7 +103,8 @@ def main(
     robot = RevolutePlanarRobot(link_length, width, dof) # (7, 1), (2, 3)
 
     generate_data_planar_manipulators(robot, folder, obstacles, label_type=label_type,
-        num_class=num_class, num_points=num_init_points, env_id=env_name, vis=True)
+        num_class=num_class, num_points=num_init_points, env_id=env_name, vis=True,
+        generate_random_cfgs=generate_random_cfgs)
     return
 
 if __name__ == "__main__":
@@ -119,5 +121,6 @@ if __name__ == "__main__":
     parser.add_argument('--num-init-points', type=int, default=8000)
     parser.add_argument('--width', help='link width', type=float, default=0.3)
     parser.add_argument('--random-seed', type=int, default=2021)
+    parser.add_argument('--no-random-cfgs', dest='generate_random_cfgs', action='store_false', default=True)
     args = parser.parse_args()
     main(**vars(args))

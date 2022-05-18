@@ -12,6 +12,8 @@ from matplotlib.patches import Circle, Rectangle
 from numpy.random import rand, randint
 from tqdm import tqdm
 
+from distest_error_vis import generate_unified_grid
+
 sns.set()
 
 def create_plots(robot, obstacles, cfg=None):
@@ -123,8 +125,15 @@ def detect_collisions(
         obs_num: int,
         num_points: int,
         label_type: str, 
-        env_id: str = ''):
-    cfgs = torch.rand((num_points, robot.dof), dtype=torch.float32)
+        env_id: str = '',
+        generate_random_cfgs: bool = True):
+    if generate_random_cfgs:
+        cfgs = torch.rand((num_points, robot.dof), dtype=torch.float32)
+    else:
+        assert robot.dof == 2, f"Expected 2 degrees of freedom, got {robot.dof}"
+        num_points_sqrt = int(np.sqrt(num_points))
+        assert num_points == num_points_sqrt ** 2, "Expected num of init points to be a perfect square!"
+        cfgs = generate_unified_grid(num_points_sqrt, num_points_sqrt)
     cfgs = cfgs * (robot.limits[:, 1]-robot.limits[:, 0]) + robot.limits[:, 0]
     robot_links = robot.update_polygons(cfgs[0])
     robot_manager = fcl.DynamicAABBTreeCollisionManager()
@@ -167,9 +176,9 @@ def detect_collisions(
         print('0 Collision. You may want to regenerate env {}obs{}'.format(obs_num, env_id))
     return robot, cfgs, labels, dists
 
-def build_dataset(robot, obstacles: list, num_points: int, num_class: int, label_type: str, env_id: str):
+def build_dataset(robot, obstacles: list, num_points: int, num_class: int, label_type: str, env_id: str, generate_random_cfgs: bool = True):
     labels, dists, obs_managers = generate_labels(label_type, obstacles, num_points, num_class)
-    robot, cfgs, labels, dists = detect_collisions(robot, labels, dists, obs_managers, len(obstacles), num_points, label_type, env_id)
+    robot, cfgs, labels, dists = detect_collisions(robot, labels, dists, obs_managers, len(obstacles), num_points, label_type, env_id, generate_random_cfgs)
     return robot, cfgs, labels, dists
 
 def generate_data_planar_manipulators(
@@ -181,7 +190,8 @@ def generate_data_planar_manipulators(
         num_class: int = None,
         num_points: int = 8000,
         env_id: str = '',
-        vis: bool = True):
+        vis: bool = True,
+        generate_random_cfgs: bool = True):
     """Generate dataset for a 2D planar manipulator robot.
     """
     if obstacles is not None and obs_num is not None:
@@ -192,7 +202,7 @@ def generate_data_planar_manipulators(
     if obs_num is None:
         assert obstacles is not None
         obs_num = len(obstacles)
-    robot, cfgs, labels, dists = build_dataset(robot, obstacles, num_points, num_class, label_type, env_id)
+    robot, cfgs, labels, dists = build_dataset(robot, obstacles, num_points, num_class, label_type, env_id, generate_random_cfgs)
 
     dataset = {
         'data': cfgs, 'label': labels, 'dist': dists, 'obs': obstacles, 
