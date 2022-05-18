@@ -221,7 +221,8 @@ def main(
     if pretrained_checker:
         checker = load_pretrained_checker(pretrained_checker)
     else:
-        checker = train_checker(checker_type, cfgs[train_indices], labels[train_indices], dists[train_indices], fkine, obstacles, lmbda, keep_all)
+        checker = train_checker(checker_type, cfgs[train_indices], labels[train_indices],
+            dists[train_indices], fkine, obstacles, description, lmbda, keep_all)
     fit_checker(checker, kernel_type, fit_full_poly, fitting_target, fitting_epsilon, fkine)
     dist_est = get_estimator(checker, scoring_method)
     test_checker(checker, dist_est, cfgs[test_indices], labels[test_indices], safety_margin)
@@ -350,6 +351,7 @@ def train_checker(
         train_dists: torch.Tensor,
         fkine: Union[Callable, None],
         obstacles: list,
+        trained_checker_dump: str,
         lmbda=10,
         keep_all: bool = False) -> CollisionChecker:
     """Train a collision checker.
@@ -360,7 +362,8 @@ def train_checker(
         train_labels (torch.Tensor): The training data labels.
         train_dists (torch.Tensor): The training data dists.
         fkine (Callable | None): The forward kinematics method (could be None).
-        obstacles: The obstacles.
+        obstacles (list): The obstacles.
+        trained_dump_filename (str): The filename for the trained checker dump.
         lmbda (int): Argument passed to RQKernel when training a new collision
             checker. Defaults to 10.
         keep_all (bool): Argument for training the collision checker. When False
@@ -374,7 +377,7 @@ def train_checker(
     checker = checker_type(obstacles, kernel_func=kernel_func, beta=1.0) 
     checker.train(train_data, train_labels, max_iteration=len(train_data), distance=train_dists, keep_all=keep_all)
     os.makedirs('results', exist_ok=True)
-    with open('results/checker_errvis.p', 'wb') as f:
+    with open(os.path.join('results', f'{trained_checker_dump}.p'), 'wb') as f:
         pickle.dump(checker, f)
         print('checker saved: {}'.format(f.name))
     return checker
