@@ -140,7 +140,7 @@ def create_plots(robot, obstacles, dist_est, gt_grid, use3d=False):
     return est_grid.reshape(-1), c_axes
 
 def generate_unified_grid(width: int = 400, height: int = 400):
-    yy, xx = torch.meshgrid(torch.linspace(-np.pi, np.pi, width), torch.linspace(-np.pi, np.pi, height))
+    yy, xx = torch.meshgrid(torch.linspace(-np.pi, np.pi, width), torch.linspace(-np.pi, np.pi, height), indexing='ij')
     grid_points = torch.stack([xx, yy], axis=2).reshape((-1, 2))
     return grid_points
 
