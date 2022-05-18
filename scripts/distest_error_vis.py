@@ -60,8 +60,8 @@ def create_plots(robot, obstacles, dist_est, gt_grid, use3d=False):
     eff_plot, = ax.plot(points[-1:, 0], points[-1:, 1], 'o', color='black', markersize=lw)
 
     size = [400, 400]
-    yy, xx = torch.meshgrid(torch.linspace(-np.pi, np.pi, size[0]), torch.linspace(-np.pi, np.pi, size[1]))
-    grid_points = torch.stack([xx, yy], axis=2).reshape((-1, 2))
+    grid_points = generate_unified_grid(*size)
+    xx, yy = grid_points.reshape(*size, 2).unbind(dim=2)
     est_grid = dist_est(grid_points).reshape(size)
     gt_grid = gt_grid.reshape(size)
     # gt_grid = torch.from_numpy(ndimage.gaussian_filter(gt_grid, 15))
@@ -138,6 +138,11 @@ def create_plots(robot, obstacles, dist_est, gt_grid, use3d=False):
             c_ax.grid(False)
     
     return est_grid.reshape(-1), c_axes
+
+def generate_unified_grid(width: int = 400, height: int = 400):
+    yy, xx = torch.meshgrid(torch.linspace(-np.pi, np.pi, width), torch.linspace(-np.pi, np.pi, height))
+    grid_points = torch.stack([xx, yy], axis=2).reshape((-1, 2))
+    return grid_points
 
 def FastronClustering(cfgs, fkine, c_ax):
     from sklearn.cluster import KMeans
