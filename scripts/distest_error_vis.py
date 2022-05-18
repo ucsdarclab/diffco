@@ -236,10 +236,8 @@ def main(
         correlation(gt_grid, est_grid, correlation_filename)
         test_error(gt_grid, est_grid)
     elif task == 'compare':
-        if robot.dof == 2:
-            compare(checker, robot, obstacles, cfgs, dists, dist_est)
-        else:
-            print(f'Expected DOF=2 to run compare(), but got DOF={robot.dof}')
+        assert robot.dof == 2, f"Expected 2 degrees of freedom, got {robot.dof}"
+        compare(checker, robot, obstacles, cfgs, dists, dist_est)
     else:
         raise ValueError(task)
 
