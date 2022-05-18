@@ -10,6 +10,7 @@ from diffco.Obstacles import FCLObstacle
 from matplotlib import pyplot as plt
 from matplotlib.patches import Circle, Rectangle
 from numpy.random import rand, randint
+from tqdm import tqdm
 
 sns.set()
 
@@ -135,7 +136,7 @@ def detect_collisions(
     
     times = []
     st = time()
-    for i, cfg in enumerate(cfgs):
+    for i, cfg in tqdm(enumerate(cfgs), total=len(cfgs), desc="Generating dataset"):
         st1 = time()
         robot.update_polygons(cfg)
         robot_manager.update()
