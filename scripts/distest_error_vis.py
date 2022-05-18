@@ -162,6 +162,7 @@ def train():
     pass
 
 def main(
+        task: str,
         DOF: int,
         env_name: str,
         dataset_filepath: str,
@@ -181,6 +182,7 @@ def main(
     correlation, and compares different configurations.
 
     Args:
+        task (str): The task to perform. Must be 'correlation' or 'compare'.
         DOF (int): Robot's degrees of freedom. Used to identify the dataset file
             if the path to the dataset is not provided. (Should deprecate in
             favor of requiring dataset filepath?) If a dataset filename is not
@@ -232,17 +234,19 @@ def main(
     dist_est = get_estimator(checker, scoring_method)
     test_checker(checker, dist_est, cfgs[test_indices], labels[test_indices], safety_margin)
 
-    # Correlation
-    correlation_filename = f'{DOF}dof_{env_name}_{fitting_target}_{"woFK" if checker.fkine is None else "withFK"}.png'
-    gt_grid = dists[test_indices]
-    est_grid = dist_est(cfgs[test_indices])
-    correlation(gt_grid, est_grid, correlation_filename)
-    test_error(gt_grid, est_grid)
-
-    if robot.dof == 2:
-        compare(checker, robot, obstacles, cfgs, dists, dist_est)
+    if task == 'correlation':
+        correlation_filename = f'{DOF}dof_{env_name}_{fitting_target}_{"woFK" if checker.fkine is None else "withFK"}.png'
+        gt_grid = dists[test_indices]
+        est_grid = dist_est(cfgs[test_indices])
+        correlation(gt_grid, est_grid, correlation_filename)
+        test_error(gt_grid, est_grid)
+    elif task == 'compare':
+        if robot.dof == 2:
+            compare(checker, robot, obstacles, cfgs, dists, dist_est)
+        else:
+            print(f'Expected DOF=2 to run compare(), but got DOF={robot.dof}')
     else:
-        print(f'Expected DOF=2 to run compare(), but got DOF={robot.dof}')
+        raise ValueError(task)
 
 def unpack_dataset(
         env_name: str = None,
@@ -558,6 +562,7 @@ def decomposition():
 if __name__ == "__main__":
     desc = 'Tool for calculating and plotting correlation between DiffCo and FCL libraries.'
     parser = argparse.ArgumentParser(description=desc)
+    parser.add_argument('task', choices=['correlation', 'compare'])
     parser.add_argument('-c', '--checker', dest='checker_type', help='Collision checker class',
         choices=['DiffCo', 'MultiDiffco'], default='DiffCo')
     parser.add_argument('--pretrained-checker', help='path to pretrained collision checker', type=str, default=None)
