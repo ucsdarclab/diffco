@@ -163,8 +163,6 @@ def train():
 
 def main(
         task: str,
-        DOF: int,
-        env_name: str,
         dataset_filepath: str,
         checker_type: CollisionChecker,
         lmbda: int,
@@ -183,16 +181,7 @@ def main(
 
     Args:
         task (str): The task to perform. Must be 'correlation' or 'compare'.
-        DOF (int): Robot's degrees of freedom. Used to identify the dataset file
-            if the path to the dataset is not provided. (Should deprecate in
-            favor of requiring dataset filepath?) If a dataset filename is not
-            provided, DOF must be provided.
-        env_name (str): Dataset environment nickname. Used to identify the
-            dataset file if the path to the dataset is not provided. (Should
-            deprecate in favor of requiring dataset filepath?) If a dataset
-            filename is not provided, env_name must be provided.
-        dataset_filepath (str): Path to dataset. If None, DOF and env_name must
-            be provided.
+        dataset_filepath (str): Path to dataset.
         checker_type (CollisionChecker): The collision checker class.
         lmbda (int): Argument passed to RQKernel when training a new collision
             checker.
@@ -223,7 +212,7 @@ def main(
     if random_seed:
         torch.manual_seed(random_seed)
         np.random.seed(random_seed)
-    robot, cfgs, labels, dists, obstacles = unpack_dataset(env_name, DOF, dataset_filepath)
+    robot, cfgs, labels, dists, obstacles = unpack_dataset(dataset_filepath)
     fkine = robot.fkine if use_fk else None
     train_indices, test_indices = train_test_split(len(cfgs), int(0.75 * len(cfgs)))
     if pretrained_checker:
@@ -235,7 +224,8 @@ def main(
     test_checker(checker, dist_est, cfgs[test_indices], labels[test_indices], safety_margin)
 
     if task == 'correlation':
-        correlation_filename = f'{DOF}dof_{env_name}_{fitting_target}_{"woFK" if checker.fkine is None else "withFK"}.png'
+        description = os.path.splitext(dataset_filepath)[0]  # Remove the .pt extension
+        correlation_filename = f'{description}_{fitting_target}_{"woFK" if checker.fkine is None else "withFK"}.png'
         gt_grid = dists[test_indices]
         est_grid = dist_est(cfgs[test_indices])
         correlation(gt_grid, est_grid, correlation_filename)
@@ -248,25 +238,12 @@ def main(
     else:
         raise ValueError(task)
 
-def unpack_dataset(
-        env_name: str = None,
-        DOF: int = None,
-        dataset_filepath: str = None) -> Tuple[Model, torch.Tensor, torch.Tensor, torch.Tensor, list]:
+def unpack_dataset(dataset_filepath: str) -> Tuple[Model, torch.Tensor, torch.Tensor, torch.Tensor, list]:
     """Load and unpack the dataset from file.
 
     Args:
-        env_name (str): Dataset environment nickname. Used to identify the
-            dataset file if the path to the dataset is not provided. (Should
-            deprecate in favor of requiring dataset filepath?) Defaults to None,
-            but if a dataset filename is not provided, env_name must be
-            provided.
-        DOF (int): Robot's degrees of freedom. Used to identify the dataset file
-            if the path to the dataset is not provided. (Should deprecate in
-            favor of requiring dataset filepath?) Defaults to None, but if a
-            dataset filename is not provided, DOF must be provided.
-        dataset_filepath (str): Path to dataset. Defaults to None, in which case
-            DOF and env_name must be provided.
-    
+        dataset_filepath (str): Path to dataset.
+
     Returns:
         diffco.model.Model: The robot model.
         torch.Tensor: The dataset "data".
@@ -274,10 +251,7 @@ def unpack_dataset(
         torch.Tensor: The dists.
         list: The obstacles.
     """
-    if env_name:
-        dataset = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name))
-    elif dataset_filepath:
-        dataset = torch.load(dataset_filepath)
+    dataset = torch.load(dataset_filepath)
     cfgs = dataset['data']
     labels = dataset['label']
     dists = dataset['dist']
@@ -464,7 +438,6 @@ def correlation(gt_grid: torch.Tensor, est_grid: torch.Tensor, output_filename: 
     # ax.spines['left'].set_position('center')
     # ax.spines['bottom'].set_position('center')
 
-    # plt.savefig('figs/correlation/{}dof_{}_{}.pdf'.format(DOF, env_name, fitting_target))#, dpi=500)
     os.makedirs('figs/correlation', exist_ok=True)
     plt.savefig(f'figs/correlation/{output_filename}', dpi=300)
 
@@ -567,8 +540,6 @@ if __name__ == "__main__":
         choices=['DiffCo', 'MultiDiffco'], default='DiffCo')
     parser.add_argument('--pretrained-checker', help='path to pretrained collision checker', type=str, default=None)
     parser.add_argument('-d', '--dataset', dest='dataset_filepath', help='Dataset filepath')
-    parser.add_argument('--dof', dest='DOF', help='degrees of freedom', type=int)
-    parser.add_argument('--env', dest='env_name', help='environment tag name', type=str)
     parser.add_argument('-l', '--lambdas', dest='lmbda', help='# of lambdas for DiffCo kernel', type=int, default=10)
     parser.add_argument('--keep-all', action='store_true', default=False)
     parser.add_argument('--no-fk', dest='use_fk', action='store_false', default=True)
@@ -593,7 +564,4 @@ if __name__ == "__main__":
     elif args.kernel_type == 'multiquadratic':
         args.kernel_type = kernel.MultiQuadratic
 
-    if not args.dataset_filepath:
-        if not args.DOF or not args.env_name:
-            parser.error('without dataset, both --dof and --env are required')
     main(**vars(args))
