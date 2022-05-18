@@ -218,8 +218,13 @@ def main(
     description = os.path.splitext(os.path.basename(dataset_filepath))[0]  # Remove the .pt extension
     fkine = robot.fkine if use_fk else None
     train_indices, test_indices = train_test_split(len(cfgs), int(0.75 * len(cfgs)))
+    cached_pretrained_checker = os.path.join('results', f'{description}.p')
     if pretrained_checker:
+        print(f'Loading user-defined pretrained checker at {pretrained_checker!r}')
         checker = load_pretrained_checker(pretrained_checker)
+    elif os.path.exists(cached_pretrained_checker):
+        print(f'Found a cached pretrained checker at {cached_pretrained_checker!r}')
+        checker = load_pretrained_checker(cached_pretrained_checker)
     else:
         checker = train_checker(checker_type, cfgs[train_indices], labels[train_indices],
             dists[train_indices], fkine, obstacles, description, lmbda, keep_all)
