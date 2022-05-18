@@ -237,7 +237,8 @@ def main(
         test_error(gt_grid, est_grid)
     elif task == 'compare':
         assert robot.dof == 2, f"Expected 2 degrees of freedom, got {robot.dof}"
-        compare(checker, robot, obstacles, cfgs, dists, dist_est)
+        comparison_filename = f'{description}_{fitting_target}.png'
+        compare(checker, robot, obstacles, cfgs, dists, dist_est, comparison_filename)
     else:
         raise ValueError(task)
 
@@ -513,7 +514,8 @@ def compare(
         obstacles: list,
         cfgs: torch.Tensor,
         dists: torch.Tensor,
-        dist_est: Callable) -> None:
+        dist_est: Callable,
+        output_filename: str) -> None:
     """Create 3 figures to compare the workspace and two configuration spaces
     for a 2 DOF robot.
     
@@ -524,26 +526,21 @@ def compare(
         cfgs (torch.Tensor): The data.
         dists (torch.Tensor): The dists.
         dist_est (Callable): The distance estimator function.
+        output_filename (str): The desired filename of the output figure.
     """
-    # diffco 3-figure compare (work, c space 1, c space 2)==========
     checker.gains = checker.gains.reshape(-1, 1)
 
     raw_grid_score = dist_est(cfgs)
     raw_grid_score = torch.from_numpy(ndimage.gaussian_filter(raw_grid_score, 1))
 
     use3d = False
-    dpi=100
     # est, c_axes = create_plots(robot, obstacles, dist_est, dists, use3d=use3d) # raw_grid_score)#gt_grid)
     est, c_axes = create_plots(robot, obstacles, dist_est, raw_grid_score, use3d=use3d) # raw_grid_score)#gt_grid)
     c_support_points = checker.support_points
     c_axes[1].scatter(c_support_points[:, 0], c_support_points[:, 1], marker='.', c='black', s=1.5)
     plt.tight_layout()
-    # plt.show()
-    # plt.savefig('figs/original_DiffCo_score_compared_{}_dpi{}.jpg'.format('3d' if use3d else '2d', dpi), dpi=dpi, bbox_inches='tight')
-    # plt.savefig('figs/robot_gallery/2d_{}dof_{}.jpg'.format(DOF, env_name), dpi=dpi, bbox_inches='tight')
-    # plt.savefig('figs/vis_{}.png'.format(env_name), dpi=500)
-    plt.savefig('figs/test_output.png', dpi=500)
-    # plt.savefig('figs/new_diffco_vis.png')
+    os.makedirs('figs/comparison', exist_ok=True)
+    plt.savefig(f'figs/comparison/{output_filename}', dpi=500)
 
 
 def plot_r_squared():
