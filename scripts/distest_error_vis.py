@@ -529,13 +529,8 @@ def compare(
         output_filename (str): The desired filename of the output figure.
     """
     checker.gains = checker.gains.reshape(-1, 1)
-
-    raw_grid_score = dist_est(cfgs)
-    raw_grid_score = torch.from_numpy(ndimage.gaussian_filter(raw_grid_score, 1))
-
     use3d = False
-    # est, c_axes = create_plots(robot, obstacles, dist_est, dists, use3d=use3d) # raw_grid_score)#gt_grid)
-    est, c_axes = create_plots(robot, obstacles, dist_est, raw_grid_score, use3d=use3d) # raw_grid_score)#gt_grid)
+    est, c_axes = create_plots(robot, obstacles, dist_est, dists, use3d=use3d)
     c_support_points = checker.support_points
     c_axes[1].scatter(c_support_points[:, 0], c_support_points[:, 1], marker='.', c='black', s=1.5)
     plt.tight_layout()
