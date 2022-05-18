@@ -217,7 +217,9 @@ def main(
     robot, cfgs, labels, dists, obstacles = unpack_dataset(dataset_filepath)
     description = os.path.splitext(os.path.basename(dataset_filepath))[0]  # Remove the .pt extension
     fkine = robot.fkine if use_fk else None
-    train_indices, test_indices = train_test_split(len(cfgs), int(0.75 * len(cfgs)))
+
+    # Train on 75% of the data or 10,000 instances, whichever is smaller
+    train_indices, test_indices = train_test_split(len(cfgs), min(int(0.75 * len(cfgs)), 10000))
     if pretrained_checker:
         checker = load_pretrained_checker(pretrained_checker)
     else:
