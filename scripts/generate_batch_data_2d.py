@@ -129,12 +129,12 @@ def detect_collisions(
         generate_random_cfgs: bool = True):
     if generate_random_cfgs:
         cfgs = torch.rand((num_points, robot.dof), dtype=torch.float32)
+        cfgs = cfgs * (robot.limits[:, 1]-robot.limits[:, 0]) + robot.limits[:, 0]
     else:
         assert robot.dof == 2, f"Expected 2 degrees of freedom, got {robot.dof}"
         num_points_sqrt = int(np.sqrt(num_points))
         assert num_points == num_points_sqrt ** 2, "Expected num of init points to be a perfect square!"
         cfgs = generate_unified_grid(num_points_sqrt, num_points_sqrt)
-    cfgs = cfgs * (robot.limits[:, 1]-robot.limits[:, 0]) + robot.limits[:, 0]
     robot_links = robot.update_polygons(cfgs[0])
     robot_manager = fcl.DynamicAABBTreeCollisionManager()
     robot_manager.registerObjects(robot_links)
