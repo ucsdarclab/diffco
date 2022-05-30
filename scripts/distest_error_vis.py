@@ -536,7 +536,11 @@ def compare(
         cfgs: torch.Tensor,
         dists: torch.Tensor,
         dist_est: Callable,
-        output_filename: str) -> None:
+        output_filename: str,
+        use_3d: bool = False,
+        view_3d: str = 'surface',
+        render_arrows: bool = False,
+        render_configuration_point: bool = False) -> None:
     """Create 3 figures to compare the workspace and two configuration spaces
     for a 2 DOF robot.
     
@@ -548,10 +552,16 @@ def compare(
         dists (torch.Tensor): The dists.
         dist_est (Callable): The distance estimator function.
         output_filename (str): The desired filename of the output figure.
+        use_3d (bool): Flag for generating a 3D plot.
+        view_3d (str): Type of 3D plot to generate. Must be one of 'surface',
+            'wireframe', or 'contour'. Defaults to 'surface'.
+        render_arrows (bool): Flag for rendering arrows on plot.
+        render_configuration_point (bool): Flag for rendering current state in
+            configuration space.
     """
     checker.gains = checker.gains.reshape(-1, 1)
-    use3d = False
-    est, c_axes = create_plots(robot, obstacles, dist_est, dists, use3d=use3d)
+    est, c_axes = create_plots(robot, obstacles, dist_est, dists, use_3d, view_3d, render_arrows,
+        render_configuration_point)
     c_support_points = checker.support_points
     c_axes[1].scatter(c_support_points[:, 0], c_support_points[:, 1], marker='.', c='black', s=1.5)
     plt.tight_layout()
