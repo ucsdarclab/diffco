@@ -491,8 +491,7 @@ def correlation(gt_grid: torch.Tensor, est_grid: torch.Tensor, output_filename: 
     # ax.spines['left'].set_position('center')
     # ax.spines['bottom'].set_position('center')
 
-    os.makedirs('figs/correlation', exist_ok=True)
-    plt.savefig(f'figs/correlation/{output_filename}', dpi=300)
+    save_figure(os.path.join('figs/correlation', output_filename), dpi=300)
 
 
 def test_error(gt_grid: torch.Tensor, est: torch.Tensor) -> None:
@@ -534,8 +533,23 @@ def compare(
     c_support_points = checker.support_points
     c_axes[1].scatter(c_support_points[:, 0], c_support_points[:, 1], marker='.', c='black', s=1.5)
     plt.tight_layout()
-    os.makedirs('figs/comparison', exist_ok=True)
-    plt.savefig(f'figs/comparison/{output_filename}', dpi=500)
+    save_figure(os.path.join('figs/comparison', output_filename), dpi=500)
+
+
+def save_figure(filepath: str, dpi: int = 300, verbose: bool = True):
+    """Save current matplotlib figure at desired filepath, creating
+    subdirectories if necessary.
+    
+    Args:
+        filepath (str): The desired filepath for the figure (will overwrite if
+            there is an existing file).
+        dpi (int): The image resolution. Defaults to 300.
+        verbose (bool): Flag for printing out the filepath. Defaults to True.
+    """
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    plt.savefig(filepath, dpi=dpi)
+    if verbose:
+        print(f'Saved figure at {filepath!r}')
 
 
 def plot_r_squared():
