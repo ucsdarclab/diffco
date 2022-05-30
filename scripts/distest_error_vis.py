@@ -188,7 +188,6 @@ def main(
         dataset_filepath: str,
         checker_type: CollisionChecker,
         lmbda: int,
-        keep_all: bool,
         use_fk: bool,
         kernel_type: kernel.KernelFunc,
         fit_full_poly: bool,
@@ -207,9 +206,6 @@ def main(
         checker_type (CollisionChecker): The collision checker class.
         lmbda (int): Argument passed to RQKernel when training a new collision
             checker.
-        keep_all (bool): Argument for training the collision checker. When
-            False, support points are filtered. When True, all support points
-            are kept.
         use_fk (bool): Flag for using forward kinematics or not.
         kernel_type (KernelFunc): The type of kernel function to use when
             fit_full_poly is False. Currently supported kernel types are
@@ -246,7 +242,7 @@ def main(
         checker = load_pretrained_checker(pretrained_checker)
     else:
         checker = train_checker(checker_type, cfgs[train_indices], labels[train_indices],
-            dists[train_indices], fkine, obstacles, description, lmbda, keep_all)
+            dists[train_indices], fkine, obstacles, description, lmbda)
     fit_checker(checker, kernel_type, fit_full_poly, fitting_target, fitting_epsilon, fkine)
     dist_est = get_estimator(checker, scoring_method)
     test_checker(checker, dist_est, cfgs[test_indices], labels[test_indices], safety_margin)
@@ -375,8 +371,7 @@ def train_checker(
         fkine: Union[Callable, None],
         obstacles: list,
         trained_checker_dump: str,
-        lmbda=10,
-        keep_all: bool = False) -> CollisionChecker:
+        lmbda=10) -> CollisionChecker:
     """Train a collision checker.
 
     Args:
@@ -389,16 +384,13 @@ def train_checker(
         trained_dump_filename (str): The filename for the trained checker dump.
         lmbda (int): Argument passed to RQKernel when training a new collision
             checker. Defaults to 10.
-        keep_all (bool): Argument for training the collision checker. When False
-            (default), support points are filtered. When True, all support
-            points are kept.
     
     Returns:
         diffco.CollisionChecker: The trained collision checker.
     """
     kernel_func = kernel.FKKernel(fkine, kernel.RQKernel(lmbda)) if fkine is not None else kernel.RQKernel(lmbda)
     checker = checker_type(obstacles, kernel_func=kernel_func, beta=1.0) 
-    checker.train(train_data, train_labels, max_iteration=len(train_data), distance=train_dists, keep_all=keep_all)
+    checker.train(train_data, train_labels, max_iteration=len(train_data), distance=train_dists)
     os.makedirs('results', exist_ok=True)
     with open(os.path.join('results', f'{trained_checker_dump}.p'), 'wb') as f:
         pickle.dump(checker, f)
