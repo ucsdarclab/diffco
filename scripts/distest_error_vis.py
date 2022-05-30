@@ -21,7 +21,29 @@ from scipy import ndimage
 sns.set()
 
 
-def create_plots(robot, obstacles, dist_est, gt_grid, use3d=False):
+def create_plots(
+        robot: Model,
+        obstacles: list,
+        dist_est: Callable,
+        gt_grid: torch.Tensor,
+        use3d: bool = False,
+        view_3d: str = 'surface',
+        render_arrows: bool = True,
+        render_configuration_point: bool = True) -> Tuple[torch.Tensor, list]:
+    """Create plots for comparing FCL and DiffCo configuration spaces.
+    
+    Args:
+        robot (Model): The 2 DOF robot from the dataset.
+        obstacles (list): The obstacles from the dataset.
+        dist_est (Callable): The distance estimator function.
+        gt_grid (torch.Tensor): The dists calculated by FCL.
+        use3d (bool): Flag for generating a 3D plot.
+        view_3d (str): Type of 3D plot to generate. Must be one of 'surface',
+            'wireframe', or 'contour'. Defaults to 'surface'.
+        render_arrows (bool): Flag for rendering arrows on plot.
+        render_configuration_point (bool): Flag for rendering current state in
+            configuration space.
+    """
     # Adjust figsize according to your specific arrangement
     fig = plt.figure(figsize=(4*2+0.5, 4 * 1))
     # fig = plt.figure(figsize=(3*2+0.5, 3 * 1)) # temp
@@ -74,60 +96,60 @@ def create_plots(robot, obstacles, dist_est, gt_grid, use3d=False):
             c_ax = fig.add_subplot(gs[0, i], projection='3d' if use3d else None)
 
             if use3d:
-                from matplotlib import cm
-                # c_ax.plot_wireframe(xx.numpy(), yy.numpy(), d.numpy(), alpha=1, #vmin=-d.max(), vmax=d.max(), 
-                #     rstride=10, cstride=10, linewidth=0.1, antialiased=False, edgecolor='black') # , 'RdBu_r' 
-                surf = c_ax.plot_surface(xx.numpy(), yy.numpy(), d.numpy(), alpha=1, #vmin=-d.max(), vmax=d.max(), 
-                    rstride=10, cstride=10, linewidth=0.1, antialiased=True, cmap='Greys_r', edgecolor='black') # , 'RdBu_r' cmap='Greys_r', 
-                # c_ax.plot_wireframe(xx.numpy(), yy.numpy(), d.numpy(), rstride=5, cstride=5, color='black')
-                # surf._facecolors2d=surf._facecolor3d
-                # surf._facecolors3d = 'face'
-                # surf.set_edgecolor('none')
-                # c_ax.contour3D(xx, yy, d, 50, linewidths=1, alpha=1)
-                # c_ax.plot_surface(xx[::199, ::199], yy[::199, ::199].numpy(), np.zeros_like(yy[::199, ::199].numpy()), alpha=0.3) #, vmin=-torch.abs(d).max(), vmax=torch.abs(d).max()) #cmap='RdBu_r', 
-            else:
-                color_mesh = c_ax.pcolormesh(xx, yy, d, cmap='RdBu_r', vmin=-torch.abs(d).max(), vmax=torch.abs(d).max())#, alpha=0.5) # binary shading='gouraud', 
-                c_ax.contour(xx, yy, d, levels=[0], linewidths=1, alpha=0.4) #-1.5, -0.75, 0, 0.3
-
-            # ============arrows and configuration point========
-            sparse_stride = 20
-            sparse_score = d[5:-5:sparse_stride, 5:-5:sparse_stride]
-            score_grad_x = -ndimage.sobel(sparse_score.numpy(), axis=1)
-            score_grad_y = -ndimage.sobel(sparse_score.numpy(), axis=0)
-            if use3d:
-                score_grad = np.stack([score_grad_x, score_grad_y, -(score_grad_x**2+score_grad_y**2)], axis=2)
-                score_grad /= np.linalg.norm(score_grad, axis=2, keepdims=True)
-                score_grad_x, score_grad_y, score_grad_z = [score_grad[:, :, dim] for dim in range(3)]
-            else:
-                score_grad = np.stack([score_grad_x, score_grad_y], axis=2)
-                score_grad /= np.linalg.norm(score_grad, axis=2, keepdims=True) / 10
-                score_grad_x, score_grad_y = score_grad[:, :, 0], score_grad[:, :, 1]
-            if use3d:
-                # c_ax.quiver(xx[5:-5:sparse_stride, 5:-5:sparse_stride], yy[5:-5:sparse_stride, 5:-5:sparse_stride], sparse_score+0.05, 
-                #     score_grad_x, score_grad_y, score_grad_z,
-                #     color='red') #width=1e-2, headwidth=2, headlength=5
-                c_ax.set_aspect('auto', adjustable='box')
-                nearest_gridpoint = np.argmin(np.square(grid_points-q).sum(axis=1))
-                print(xx.reshape(-1)[nearest_gridpoint], yy.reshape(-1)[nearest_gridpoint], )
-                q_score = d.reshape(-1, 1)[nearest_gridpoint]
-                # c_ax.scatter([q[0].item()], [q[1].item()], q_score+0.5, marker='o', s=40, c='orange', edgecolors='black', zorder=100)
-                circle_patch = Circle([q[0].item(), q[1].item()], np.pi/20, ec='k', fc="orange", alpha=1)
-                c_ax.add_patch(circle_patch)
-                from mpl_toolkits.mplot3d import art3d
-                art3d.pathpatch_2d_to_3d(circle_patch, z=q_score, zdir="z")
+                if view_3d == 'wireframe':
+                    c_ax.plot_wireframe(xx.numpy(), yy.numpy(), d.numpy(), alpha=1, #vmin=-d.max(), vmax=d.max(), 
+                        rstride=10, cstride=10, linewidth=0.1, antialiased=False, edgecolor='black') # , 'RdBu_r' 
+                elif view_3d == 'surface':
+                    surf = c_ax.plot_surface(xx.numpy(), yy.numpy(), d.numpy(), alpha=1, #vmin=-d.max(), vmax=d.max(), 
+                        rstride=10, cstride=10, linewidth=0.1, antialiased=True, cmap='Greys_r', edgecolor='black') # , 'RdBu_r' cmap='Greys_r', 
+                    # surf.set_edgecolor('none')
+                elif view_3d == 'contour':
+                    c_ax.contour3D(xx, yy, d, 50, linewidths=1, alpha=1)
+                else:
+                    raise ValueError(view_3d)
                 c_ax.view_init(60, 225)
                 c_ax.set_facecolor('white')
                 c_ax.w_xaxis.set_pane_color(ax.get_facecolor())
                 c_ax.w_yaxis.set_pane_color(ax.get_facecolor())
                 c_ax.w_zaxis.set_pane_color(ax.get_facecolor())
+                c_ax.set_aspect('auto', adjustable='box')
             else:
-                c_ax.quiver(xx[5:-5:sparse_stride, 5:-5:sparse_stride], yy[5:-5:sparse_stride, 5:-5:sparse_stride], score_grad_x, score_grad_y, 
-                    color='red', width=1e-2, headwidth=2, headlength=5, pivot='mid')
+                color_mesh = c_ax.pcolormesh(xx, yy, d, cmap='RdBu_r', vmin=-torch.abs(d).max(), vmax=torch.abs(d).max())#, alpha=0.5) # binary shading='gouraud', 
+                c_ax.contour(xx, yy, d, levels=[0], linewidths=1, alpha=0.4) #-1.5, -0.75, 0, 0.3
                 c_ax.set_aspect('equal', adjustable='box')
-                c_ax.scatter([q[0].item()], [q[1].item()], marker='o', s=40, c='orange', edgecolors='black')
+
+            if render_arrows:
+                sparse_stride = 20
+                sparse_score = d[5:-5:sparse_stride, 5:-5:sparse_stride]
+                score_grad_x = -ndimage.sobel(sparse_score.numpy(), axis=1)
+                score_grad_y = -ndimage.sobel(sparse_score.numpy(), axis=0)
+                if use3d:
+                    raise NotImplementedError('Arrows not rendered properly in 3D. Set render_arrows=False to continue.')
+                    score_grad = np.stack([score_grad_x, score_grad_y, -(score_grad_x**2+score_grad_y**2)], axis=2)
+                    score_grad /= np.linalg.norm(score_grad, axis=2, keepdims=True)
+                    score_grad_x, score_grad_y, score_grad_z = [score_grad[:, :, dim] for dim in range(3)]
+                    c_ax.quiver(xx[5:-5:sparse_stride, 5:-5:sparse_stride], yy[5:-5:sparse_stride, 5:-5:sparse_stride], sparse_score+0.05, 
+                        score_grad_x, score_grad_y, score_grad_z,
+                        color='red') #width=1e-2, headwidth=2, headlength=5
+                else:
+                    score_grad = np.stack([score_grad_x, score_grad_y], axis=2)
+                    score_grad /= np.linalg.norm(score_grad, axis=2, keepdims=True) / 10
+                    score_grad_x, score_grad_y = score_grad[:, :, 0], score_grad[:, :, 1]
+                    c_ax.quiver(xx[5:-5:sparse_stride, 5:-5:sparse_stride], yy[5:-5:sparse_stride, 5:-5:sparse_stride], score_grad_x, score_grad_y, 
+                        color='red', width=1e-2, headwidth=2, headlength=5, pivot='mid')
+
+            if render_configuration_point:
+                if use3d:
+                    nearest_gridpoint = np.argmin(np.square(grid_points-q).sum(axis=1))
+                    q_score = d.reshape(-1, 1)[nearest_gridpoint]
+                    circle_patch = Circle([q[0].item(), q[1].item()], np.pi/20, ec='k', fc="orange", alpha=1)
+                    c_ax.add_patch(circle_patch)
+                    from mpl_toolkits.mplot3d import art3d
+                    art3d.pathpatch_2d_to_3d(circle_patch, z=q_score, zdir="z")
+                else:
+                    c_ax.scatter([q[0].item()], [q[1].item()], marker='o', s=40, c='orange', edgecolors='black')
             # fig.colorbar(color_mesh, ax=c_ax)
 
-            # c_ax.axis('equal')
             c_ax.set_xlim(-np.pi, np.pi)
             c_ax.set_ylim(-np.pi, np.pi)
             c_ax.set_xticks([-np.pi, 0, np.pi])
