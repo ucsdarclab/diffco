@@ -14,9 +14,10 @@ from matplotlib.patches import Rectangle, FancyBboxPatch, Circle
 import seaborn as sns
 sns.set()
 import matplotlib.patheffects as path_effects
-from diffco import utils
+from diffco import utils, CollisionChecker
 from diffco.Obstacles import FCLObstacle
 from trajectory_optim import adam_traj_optimize
+from distest_error_vis import fit_checker, get_estimator, train_checker, unpack_dataset, test_checker
 
 # def traj_optimize(robot, dist_est, start_cfg, target_cfg, history=False):
 #     # There is a slightly different version in speed_compare.py,
@@ -310,44 +311,40 @@ def single_plot(robot, p, fig, link_plot, joint_plot, eff_plot, cfg_path_plots=N
     #         cfg_path.axes.plot(seg[:, 0], seg[:, 1], '-o', c='olivedrab', alpha=0.5, markersize=3)
     # ---------------------------------------------
 
-# Commented out lines include convenient code for debugging purposes
-def main(env_name, DOF, key=None):
-    # DOF = 2
-    # env_name = # '2instance'
 
-    dataset = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name))
-    cfgs = dataset['data'].double()
-    labels = dataset['label'].double()
-    dists = dataset['dist'].double()
-    obstacles = dataset['obs']
+def main(
+        dataset_filepath: str,
+        checker_type: CollisionChecker = MultiDiffCo,
+        start_cfg: torch.Tensor = None,
+        target_cfg: torch.Tensor = None,
+        cache: bool = True,
+        random_seed: int = 19961221):
+    robot, cfgs, labels, dists, obstacles = unpack_dataset(dataset_filepath)
+    cfgs = cfgs.double()
+    labels = labels.double()
+    dists = dists.double()
     obstacles = [obs+(i, ) for i, obs in enumerate(obstacles)]
-    print(obstacles)
-    robot = dataset['robot'](*dataset['rparam'])
-    width = robot.link_width
     train_num = 6000
     fkine = robot.fkine
 
-    if key is not None:
-        env_name = f'{env_name}_{key}'
-    # checker = DiffCo(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
-    checker = MultiDiffCo(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(10)), beta=1.0)
-    checker.train(cfgs[:train_num], labels[:train_num], max_iteration=len(cfgs[:train_num]), distance=dists[:train_num])
+    train_data = cfgs[:train_num]
+    train_labels = labels[:train_num]
+    train_dists = dists[:train_num]
+    test_data = cfgs[train_num:]
+    test_labels = labels[train_num:]
+    test_dists = dists[train_num:]
 
-    # Check DiffCo test ACC
-    test_preds = (checker.score(cfgs[train_num:]) > 0) * 2 - 1
-    test_acc = torch.sum(test_preds == labels[train_num:], dtype=torch.float32)/len(test_preds.view(-1))
-    test_tpr = torch.sum(test_preds[labels[train_num:]==1] == 1, dtype=torch.float32) / len(test_preds[labels[train_num:]==1])
-    test_tnr = torch.sum(test_preds[labels[train_num:]==-1] == -1, dtype=torch.float32) / len(test_preds[labels[train_num:]==-1])
-    print('Test acc: {}, TPR {}, TNR {}'.format(test_acc, test_tpr, test_tnr))
-    assert(test_acc > 0.9)
+    if train_labels.dim() > 1 and checker_type != MultiDiffCo:
+        raise ValueError(f'If data is nonbinary you must use MultiDiffCo, not {checker_type}')
 
-    fitting_target = 'label' # {label, dist, hypo}
-    Epsilon = 1 #0.01
-    checker.fit_poly(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine)#, reg=0.09) # epsilon=Epsilon,
-    dist_est = checker.rbf_score
-    print('MIN_SCORE = {:.6f}'.format(dist_est(cfgs[train_num:]).min()))
+    description = os.path.splitext(os.path.basename(dataset_filepath))[0]  # Remove the .pt extension
+    checker = train_checker(checker_type, train_data, train_labels, train_dists, fkine, obstacles, description)
 
-    # return # DEBUGGING
+    test_checker(checker, checker.score, test_data, test_labels)
+    fit_checker(checker, fitting_epsilon=1, fitting_target='label', fkine=fkine)
+    dist_est = get_estimator(checker, scoring_method='rbf_score')
+
+    print('MIN_SCORE = {:.6f}'.format(dist_est(test_data).min()))
 
     cfg_path_plots = []
     if robot.dof > 2:
@@ -355,56 +352,49 @@ def main(env_name, DOF, key=None):
     elif robot.dof == 2:
         fig, ax, link_plot, joint_plot, eff_plot, cfg_path_plots = create_plots(robot, obstacles, dist_est, checker)
 
-    
-
-    # Begin optimization
-    # free_cfgs = cfgs[labels == -1]
-    # indices = torch.randint(0, len(free_cfgs), (2, ))
-    # while indices[0] == indices[1]:
-    #     indices = torch.randint(0, len(free_cfgs), (2, ))
-    start_cfg = torch.zeros(robot.dof, dtype=torch.float32) # free_cfgs[indices[0]] # 
-    target_cfg = torch.zeros(robot.dof, dtype=torch.float32) # free_cfgs[indices[1]] # 
-    start_cfg[0] = -np.pi/16 # -np.pi/4 #np.pi/2 #-np.pi/16
-    # start_cfg[1] = -np.pi/6
-    target_cfg[0] = -15*np.pi/16 # 3*np.pi/4 #-np.pi/2 # -15*np.pi/16
-    # target_cfg[1] = np.pi/5
+    free_cfgs = cfgs[(labels == -1).all(axis=1)]
+    indices = np.random.default_rng(random_seed).choice(len(free_cfgs), 2, replace=False)
+    if start_cfg is None:
+        start_cfg = free_cfgs[indices[0]]
+    if target_cfg is None:
+        target_cfg = free_cfgs[indices[1]]
 
     path_dir = 'results/safetybias'
     os.makedirs(path_dir, exist_ok=True)
-
-    optim_options = {
-        'N_WAYPOINTS': 20,
-        'NUM_RE_TRIALS': 10,
-        'MAXITER': 200,
-        'safety_margin': torch.DoubleTensor([-0.4, -0.4]), # [-12, -1.2], #([-8.0, -0.8]) # [-4, -0.4]
-        'max_speed': 0.3,
-        'seed': 19961221,
-        'history': False
-    }
-    # This is for doing traj optimization
-    # optim_rec = adam_traj_optimize(robot, dist_est, start_cfg, target_cfg, options=optim_options)
-    # with open(os.path.join(path_dir, 'path_2d_{}dof_{}.json'.format(robot.dof, env_name)), 'w') as f:
-    #     json.dump(optim_rec,
-    #         # {
-    #         #     'path': p.data.numpy().tolist(), 
-    #         #     'path_history': [tmp.data.numpy().tolist() for tmp in path_history],
-    #         #     'trial': num_trial,
-    #         #     'step': num_step
-    #         # },
-    #         f, indent=1)
-    #     print('Plan recorded in {}'.format(f.name))
+    traj_optim_cached_filepath = os.path.join(path_dir, f'path_{description}.json')
+    if cache and os.path.exists(traj_optim_cached_filepath):
+        with open(traj_optim_cached_filepath, 'r') as f:
+            optim_rec = json.load(f)
+            # p = torch.FloatTensor(path_dict['solution'])
+            # path_history = [torch.FloatTensor(shot) for shot in path_dict['path_history']] #[p] #
+    else:
+        optim_options = {
+            'N_WAYPOINTS': 20,
+            'NUM_RE_TRIALS': 10,
+            'MAXITER': 200,
+            'safety_margin': torch.DoubleTensor([-0.4, -0.4]), # [-12, -1.2], #([-8.0, -0.8]) # [-4, -0.4]
+            'max_speed': 0.3,
+            'seed': random_seed,
+            'history': False
+        }
+        optim_rec = adam_traj_optimize(robot, dist_est, start_cfg, target_cfg, options=optim_options)
+        if cache:
+            with open(traj_optim_cached_filepath, 'w') as f:
+                json.dump(optim_rec,
+                    # {
+                    #     'path': p.data.numpy().tolist(), 
+                    #     'path_history': [tmp.data.numpy().tolist() for tmp in path_history],
+                    #     'trial': num_trial,
+                    #     'step': num_step
+                    # },
+                    f, indent=1)
+                print('Plan recorded in {}'.format(f.name))
 
     ## This for doing the escaping-from-collision experiment
     # p = escape(robot, dist_est, start_cfg)
     # with open('results/esc_2d_{}dof_{}.json'.format(robot.dof, env_name), 'w') as f:
     #     json.dump({'path': p.data.numpy().tolist(), },f, indent=1)
     #     print('Plan recorded in {}'.format(f.name))
-
-    ## This is for loading previously computed trajectory
-    with open(os.path.join(path_dir, 'path_2d_{}dof_{}.json'.format(robot.dof, env_name)), 'r') as f:
-        optim_rec = json.load(f)
-        # p = torch.FloatTensor(path_dict['solution'])
-        # path_history = [torch.FloatTensor(shot) for shot in path_dict['path_history']] #[p] #
     
     ## This produces an animation for the trajectory
     # vid_name = None #'results/maual_trajopt_2d_{}dof_{}_fitting_{}_eps_{}_dif_{}_updates_{}_steps_{}.mp4'.format(
@@ -417,22 +407,19 @@ def main(env_name, DOF, key=None):
     #     animation_demo(robot, p, fig, link_plot, joint_plot, eff_plot, save_dir=vid_name)
 
     # (Recommended) This produces a single shot of the planned trajectory
+
+    # Remove some intermediate steps
     optim_rec['solution'] = optim_rec['solution'][0:1] + optim_rec['solution'][1:-2:2]+optim_rec['solution'][-2:]
+
     single_plot(robot, torch.FloatTensor(optim_rec['solution']), fig, link_plot, joint_plot, eff_plot, cfg_path_plots=cfg_path_plots, ax=ax)
     plt.tight_layout()
     fig_dir = 'figs/safetybias'
     os.makedirs(fig_dir, exist_ok=True)
-    # plt.show()
-    plt.savefig(os.path.join(fig_dir, '_new_2d_{}dof_{}.png'.format(robot.dof, env_name)), dpi=500)
+    plt.savefig(os.path.join(fig_dir, f'_new_{description}.png'), dpi=500)
     # plt.savefig(os.path.join(fig_dir, '_new_2d_{}dof_{}_equalmargin'.format(robot.dof, env_name)), dpi=500) #_equalmargin.png
 
     # plt.savefig('figs/opening_contourline.png', dpi=500, bbox_inches='tight')
-    
-    
-
-
 
 
 if __name__ == "__main__":
-    main('2class_2', 7, key=None) #'equalmargin'
-    # main('2class_1', 3, key='equalmargin')
+    main('data/landscape/2d_3dof_5obs_class_2class_1.pt', cache=False)
