@@ -319,6 +319,7 @@ def main(
         start_cfg: torch.Tensor = None,
         target_cfg: torch.Tensor = None,
         num_waypoints: int = 12,
+        safety_margin: torch.Tensor = None,
         cache: bool = False,
         random_seed: int = 19961221):
     if dataset_filepath is None:
@@ -368,11 +369,15 @@ def main(
             # p = torch.FloatTensor(path_dict['solution'])
             # path_history = [torch.FloatTensor(shot) for shot in path_dict['path_history']] #[p] #
     else:
+        if safety_margin is None:
+            safety_margin = torch.zeros(labels.shape[-1])
+        else:
+            assert labels.shape[-1] == len(safety_margin)
         optim_options = {
             'N_WAYPOINTS': num_waypoints,
             'NUM_RE_TRIALS': 10,
             'MAXITER': 200,
-            'safety_margin': torch.DoubleTensor([-0.4, -0.4]), # [-12, -1.2], #([-8.0, -0.8]) # [-4, -0.4]
+            'safety_margin': safety_margin,
             'max_speed': 0.3,
             'seed': random_seed,
             'history': False
@@ -426,6 +431,7 @@ if __name__ == "__main__":
     parser.add_argument('--start-cfg', nargs='*', type=float, help='Start configuration')
     parser.add_argument('--target-cfg', nargs='*', type=float, help='Final configuration')
     parser.add_argument('--num-waypoints', type=int, default=12, help='Number of waypoints')
+    parser.add_argument('--safety-margin', nargs='*', type=float, help='Safety margin')
     parser.add_argument('--cache', action='store_true', default=False)
     parser.add_argument('--random-seed', type=int, default=19961221)
     args = parser.parse_args()
@@ -439,5 +445,7 @@ if __name__ == "__main__":
         args.start_cfg = torch.Tensor(args.start_cfg)
     if args.target_cfg:
         args.target_cfg = torch.Tensor(args.target_cfg)
+    if args.safety_margin:
+        args.safety_margin = torch.Tensor(args.safety_margin)
 
     main(**vars(args))
