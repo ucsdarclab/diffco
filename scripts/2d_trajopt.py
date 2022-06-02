@@ -366,8 +366,6 @@ def main(
     if cache and os.path.exists(traj_optim_cached_filepath):
         with open(traj_optim_cached_filepath, 'r') as f:
             optim_rec = json.load(f)
-            # p = torch.FloatTensor(path_dict['solution'])
-            # path_history = [torch.FloatTensor(shot) for shot in path_dict['path_history']] #[p] #
     else:
         if safety_margin is None:
             safety_margin = torch.zeros(labels.shape[-1])
@@ -385,41 +383,16 @@ def main(
         optim_rec = adam_traj_optimize(robot, dist_est, start_cfg, target_cfg, options=optim_options)
         if cache:
             with open(traj_optim_cached_filepath, 'w') as f:
-                json.dump(optim_rec,
-                    # {
-                    #     'path': p.data.numpy().tolist(), 
-                    #     'path_history': [tmp.data.numpy().tolist() for tmp in path_history],
-                    #     'trial': num_trial,
-                    #     'step': num_step
-                    # },
-                    f, indent=1)
+                json.dump(optim_rec, f, indent=1)
                 print('Plan recorded in {}'.format(f.name))
 
-    ## This for doing the escaping-from-collision experiment
-    # p = escape(robot, dist_est, start_cfg)
-    # with open('results/esc_2d_{}dof_{}.json'.format(robot.dof, env_name), 'w') as f:
-    #     json.dump({'path': p.data.numpy().tolist(), },f, indent=1)
-    #     print('Plan recorded in {}'.format(f.name))
-    
-    ## This produces an animation for the trajectory
-    # vid_name = None #'results/maual_trajopt_2d_{}dof_{}_fitting_{}_eps_{}_dif_{}_updates_{}_steps_{}.mp4'.format(
-    #     # robot.dof, env_name, fitting_target, Epsilon, dif_weight, UPDATE_STEPS, N_STEPS)
-    # if robot.dof == 2:
-    #     animation_demo(
-    #         robot, p, fig, link_plot, joint_plot, eff_plot, 
-    #         cfg_path_plots=cfg_path_plots, path_history=path_history, save_dir=vid_name)
-    # elif robot.dof == 7:
-    #     animation_demo(robot, p, fig, link_plot, joint_plot, eff_plot, save_dir=vid_name)
-
-    # (Recommended) This produces a single shot of the planned trajectory
     single_plot(robot, torch.FloatTensor(optim_rec['solution']), fig, link_plot, joint_plot, eff_plot, cfg_path_plots=cfg_path_plots, ax=ax)
     plt.tight_layout()
     fig_dir = 'figs/safetybias'
     os.makedirs(fig_dir, exist_ok=True)
-    plt.savefig(os.path.join(fig_dir, f'_new_{description}.png'), dpi=500)
-    # plt.savefig(os.path.join(fig_dir, '_new_2d_{}dof_{}_equalmargin'.format(robot.dof, env_name)), dpi=500) #_equalmargin.png
-
-    # plt.savefig('figs/opening_contourline.png', dpi=500, bbox_inches='tight')
+    plt.savefig(os.path.join(fig_dir, f'path_{description}.png'), dpi=500)
+    animation_demo(robot, torch.FloatTensor(optim_rec['solution']), fig, link_plot, joint_plot,
+        eff_plot, cfg_path_plots, save_dir=os.path.join(fig_dir, f'path_{description}.mp4'))
 
 
 if __name__ == "__main__":
