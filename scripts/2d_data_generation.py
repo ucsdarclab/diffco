@@ -17,9 +17,13 @@ predefined_obstacles = {
     # ('rect', (8, 7), 1),
     '1rect_1circle': [('rect', (4, 3), (2, 2)),
         ('circle', (-4, -3), 1)],
-    # ('rect', (4, 3), (2, 2)), # 2rect
-    # ('rect', (-4, -3), (2, 2)) # 2rect
-    # ('rect', (3, 2), (2, 2)) # 1rect
+    '2rect': [
+        ('rect', (4, 3), (2, 2)), # 2rect
+        ('rect', (-4, -3), (2, 2)), # 2rect
+    ],
+    '1rect': [
+        ('rect', (3, 2), (2, 2)) # 1rect
+    ],
     '3circle': [
         ('circle', (0, 4.5), 1), #3circle
         ('circle', (-2, -3), 2), #3circle
@@ -59,7 +63,8 @@ def main(
         dof: int = 3,
         num_init_points: int = 8000,
         random_seed: int = 2021,
-        width: float = 0.3) -> None:
+        width: float = 0.3,
+        generate_random_cfgs: bool = True) -> None:
     torch.manual_seed(random_seed)
     np.random.seed(random_seed)
 
@@ -100,14 +105,16 @@ def main(
     robot = RevolutePlanarRobot(link_length, width, dof) # (7, 1), (2, 3)
 
     generate_data_planar_manipulators(robot, folder, obstacles, label_type=label_type,
-        num_class=num_class, num_points=num_init_points, env_id=env_name, vis=True)
+        num_class=num_class, num_points=num_init_points, env_id=env_name, vis=True,
+        generate_random_cfgs=generate_random_cfgs)
     return
 
 if __name__ == "__main__":
     desc = '2D data generation'
     parser = argparse.ArgumentParser(description=desc)
     env_choices = ['1rect_1circle', '3circle', '1rect_1circle_7d', '2class_1',
-                   '2class_2', '3circle_7d', '7d_narrow', '3d_halfnarrow']
+                   '2class_2', '3circle_7d', '7d_narrow', '3d_halfnarrow',
+                   '1rect', '2rect']
     parser.add_argument('--env', dest='env_name', help='2D environment', choices=env_choices, default='3d_halfnarrow')
     parser.add_argument('-o', '--output-dir', dest='folder', default='data/landscape')
     parser.add_argument('-l', '--label-type', choices=['instance', 'class', 'binary'], default='binary')
@@ -116,5 +123,6 @@ if __name__ == "__main__":
     parser.add_argument('--num-init-points', type=int, default=8000)
     parser.add_argument('--width', help='link width', type=float, default=0.3)
     parser.add_argument('--random-seed', type=int, default=2021)
+    parser.add_argument('--no-random-cfgs', dest='generate_random_cfgs', action='store_false', default=True)
     args = parser.parse_args()
     main(**vars(args))
