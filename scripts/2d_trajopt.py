@@ -1,3 +1,4 @@
+import argparse
 import os
 import sys
 import json
@@ -358,8 +359,12 @@ def main(
     indices = np.random.default_rng(random_seed).choice(len(free_cfgs), 2, replace=False)
     if start_cfg is None:
         start_cfg = free_cfgs[indices[0]]
+    else:
+        assert len(start_cfg) == free_cfgs.shape[-1]
     if target_cfg is None:
         target_cfg = free_cfgs[indices[1]]
+    else:
+        assert len(target_cfg) == free_cfgs.shape[-1]
 
     path_dir = 'results/safetybias'
     os.makedirs(path_dir, exist_ok=True)
@@ -424,4 +429,25 @@ def main(
 
 
 if __name__ == "__main__":
-    main('data/landscape/2d_3dof_5obs_class_2class_1.pt', cache=False)
+    desc = 'Tool for generating optimized trajectories for 2D workspaces.'
+    parser = argparse.ArgumentParser(description=desc)
+    parser.add_argument('-d', '--dataset', dest='dataset_filepath', help='Dataset filepath')
+    parser.add_argument('--checker', dest='checker_type', help='Collision checker class',
+        choices=['diffco', 'multidiffco'], default='multidiffco')
+    parser.add_argument('--start-cfg', nargs='*', type=float, help='Start configuration')
+    parser.add_argument('--target-cfg', nargs='*', type=float, help='Final configuration')
+    parser.add_argument('--cache', action='store_true', default=False)
+    parser.add_argument('--random-seed', type=int, default=19961221)
+    args = parser.parse_args()
+
+    if args.checker_type == 'diffco':
+        args.checker_type = DiffCo
+    elif args.checker_type == 'multidiffco':
+        args.checker_type = MultiDiffCo
+    
+    if args.start_cfg:
+        args.start_cfg = torch.Tensor(args.start_cfg)
+    if args.target_cfg:
+        args.target_cfg = torch.Tensor(args.target_cfg)
+
+    main(**vars(args))
