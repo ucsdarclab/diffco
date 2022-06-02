@@ -17,7 +17,7 @@ import matplotlib.patheffects as path_effects
 from diffco import utils, CollisionChecker
 from diffco.Obstacles import FCLObstacle
 from trajectory_optim import adam_traj_optimize
-from distest_error_vis import fit_checker, get_estimator, train_checker, unpack_dataset, test_checker
+from distest_error_vis import fit_checker, get_estimator, train_checker, unpack_dataset, test_checker, autogenerate_dataset
 
 # def traj_optimize(robot, dist_est, start_cfg, target_cfg, history=False):
 #     # There is a slightly different version in speed_compare.py,
@@ -313,12 +313,14 @@ def single_plot(robot, p, fig, link_plot, joint_plot, eff_plot, cfg_path_plots=N
 
 
 def main(
-        dataset_filepath: str,
+        dataset_filepath: str = None,
         checker_type: CollisionChecker = MultiDiffCo,
         start_cfg: torch.Tensor = None,
         target_cfg: torch.Tensor = None,
-        cache: bool = True,
+        cache: bool = False,
         random_seed: int = 19961221):
+    if dataset_filepath is None:
+        dataset_filepath = autogenerate_dataset(3, 5, 'class', '2class_1', random_seed=random_seed)
     robot, cfgs, labels, dists, obstacles = unpack_dataset(dataset_filepath)
     cfgs = cfgs.double()
     labels = labels.double()
