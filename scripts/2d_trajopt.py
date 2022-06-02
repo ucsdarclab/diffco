@@ -318,6 +318,7 @@ def main(
         checker_type: CollisionChecker = MultiDiffCo,
         start_cfg: torch.Tensor = None,
         target_cfg: torch.Tensor = None,
+        num_waypoints: int = 12,
         cache: bool = False,
         random_seed: int = 19961221):
     if dataset_filepath is None:
@@ -368,7 +369,7 @@ def main(
             # path_history = [torch.FloatTensor(shot) for shot in path_dict['path_history']] #[p] #
     else:
         optim_options = {
-            'N_WAYPOINTS': 20,
+            'N_WAYPOINTS': num_waypoints,
             'NUM_RE_TRIALS': 10,
             'MAXITER': 200,
             'safety_margin': torch.DoubleTensor([-0.4, -0.4]), # [-12, -1.2], #([-8.0, -0.8]) # [-4, -0.4]
@@ -406,10 +407,6 @@ def main(
     #     animation_demo(robot, p, fig, link_plot, joint_plot, eff_plot, save_dir=vid_name)
 
     # (Recommended) This produces a single shot of the planned trajectory
-
-    # Remove some intermediate steps
-    optim_rec['solution'] = optim_rec['solution'][0:1] + optim_rec['solution'][1:-2:2]+optim_rec['solution'][-2:]
-
     single_plot(robot, torch.FloatTensor(optim_rec['solution']), fig, link_plot, joint_plot, eff_plot, cfg_path_plots=cfg_path_plots, ax=ax)
     plt.tight_layout()
     fig_dir = 'figs/safetybias'
@@ -428,6 +425,7 @@ if __name__ == "__main__":
         choices=['diffco', 'multidiffco'], default='multidiffco')
     parser.add_argument('--start-cfg', nargs='*', type=float, help='Start configuration')
     parser.add_argument('--target-cfg', nargs='*', type=float, help='Final configuration')
+    parser.add_argument('--num-waypoints', type=int, default=12, help='Number of waypoints')
     parser.add_argument('--cache', action='store_true', default=False)
     parser.add_argument('--random-seed', type=int, default=19961221)
     args = parser.parse_args()
