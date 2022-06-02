@@ -18,7 +18,7 @@ import matplotlib.patheffects as path_effects
 from diffco import utils, CollisionChecker
 from diffco.Obstacles import FCLObstacle
 from trajectory_optim import adam_traj_optimize
-from distest_error_vis import fit_checker, get_estimator, train_checker, unpack_dataset, test_checker, autogenerate_dataset
+from distest_error_vis import fit_checker, get_estimator, train_checker, train_test_split, unpack_dataset, test_checker, autogenerate_dataset
 
 # def traj_optimize(robot, dist_est, start_cfg, target_cfg, history=False):
 #     # There is a slightly different version in speed_compare.py,
@@ -327,27 +327,19 @@ def main(
     labels = labels.double()
     dists = dists.double()
     obstacles = [obs+(i, ) for i, obs in enumerate(obstacles)]
-    train_num = 6000
     fkine = robot.fkine
 
-    train_data = cfgs[:train_num]
-    train_labels = labels[:train_num]
-    train_dists = dists[:train_num]
-    test_data = cfgs[train_num:]
-    test_labels = labels[train_num:]
-    test_dists = dists[train_num:]
-
-    if train_labels.dim() > 1 and checker_type != MultiDiffCo:
+    # Train on 75% of the data or 10,000 instances, whichever is smaller
+    train_indices, test_indices = train_test_split(len(cfgs), min(int(0.75 * len(cfgs)), 10000))
+    if labels.dim() > 1 and checker_type != MultiDiffCo:
         raise ValueError(f'If data is nonbinary you must use MultiDiffCo, not {checker_type}')
-
     description = os.path.splitext(os.path.basename(dataset_filepath))[0]  # Remove the .pt extension
-    checker = train_checker(checker_type, train_data, train_labels, train_dists, fkine, obstacles, description)
-
-    test_checker(checker, checker.score, test_data, test_labels)
+    checker = train_checker(checker_type, cfgs[train_indices], labels[train_indices],
+        dists[train_indices], fkine, obstacles, description)
+    test_checker(checker, checker.score, cfgs[test_indices], labels[test_indices])
     fit_checker(checker, fitting_epsilon=1, fitting_target='label', fkine=fkine)
     dist_est = get_estimator(checker, scoring_method='rbf_score')
-
-    print('MIN_SCORE = {:.6f}'.format(dist_est(test_data).min()))
+    print('MIN_SCORE = {:.6f}'.format(dist_est(cfgs[test_indices]).min()))
 
     cfg_path_plots = []
     if robot.dof > 2:
