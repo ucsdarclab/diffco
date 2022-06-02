@@ -241,7 +241,6 @@ def create_plots(robot, obstacles, dist_est, checker):
     ax.tick_params(labelsize=18)
     for obs in obstacles:
         cat = obs[3] if len(obs) >= 4 else 1
-        print('{}, cat {}, {}'.format(obs[0], cat, obs))
         if obs[0] == 'circle':
             ax.add_patch(Circle(obs[1], obs[2], path_effects=[path_effects.withSimplePatchShadow()], color=cmaps[cat](0.5)))
         elif obs[0] == 'rect':
