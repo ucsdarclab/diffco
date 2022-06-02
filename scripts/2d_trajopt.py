@@ -381,10 +381,9 @@ def main(
             'history': False
         }
         optim_rec = adam_traj_optimize(robot, dist_est, start_cfg, target_cfg, options=optim_options)
-        if cache:
-            with open(traj_optim_cached_filepath, 'w') as f:
-                json.dump(optim_rec, f, indent=1)
-                print('Plan recorded in {}'.format(f.name))
+        with open(traj_optim_cached_filepath, 'w') as f:
+            json.dump(optim_rec, f, indent=4)
+            print('Plan recorded in {}'.format(f.name))
 
     single_plot(robot, torch.FloatTensor(optim_rec['solution']), fig, link_plot, joint_plot, eff_plot, cfg_path_plots=cfg_path_plots, ax=ax)
     plt.tight_layout()
