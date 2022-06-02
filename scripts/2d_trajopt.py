@@ -192,7 +192,7 @@ def create_plots(robot, obstacles, dist_est, checker):
         cfg_path_plots = []
 
         size = [400, 400]
-        yy, xx = torch.meshgrid(torch.linspace(-np.pi, np.pi, size[0]), torch.linspace(-np.pi, np.pi, size[1]))
+        yy, xx = torch.meshgrid(torch.linspace(-np.pi, np.pi, size[0]), torch.linspace(-np.pi, np.pi, size[1]), indexing='ij')
         grid_points = torch.stack([xx, yy], axis=2).reshape((-1, 2))
         score_spline = dist_est(grid_points).reshape(size+[num_class])
         c_axes = []
