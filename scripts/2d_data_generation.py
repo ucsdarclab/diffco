@@ -57,6 +57,34 @@ predefined_obstacles = {
     '3d_halfnarrow': [],
 }
 
+def setup_7d_narrow():
+    lb = np.array([-8, 1.0], dtype=float)
+    ub = np.array([8, 8], dtype=float)
+    for i in range(150):
+        pos = np.random.rand(2,)*(ub-lb)+lb
+        pos = pos.tolist()
+        size = (1, 1)
+        predefined_obstacles['7d_narrow'].append(('rect', pos, size))
+    
+    lb = np.array([-8, -8], dtype=float)
+    ub = np.array([8, -1.0], dtype=float)
+    for i in range(150):
+        pos = np.random.rand(2,)*(ub-lb)+lb
+        pos = pos.tolist()
+        size = (1, 1)
+        predefined_obstacles['7d_narrow'].append(('rect', pos, size))
+
+def setup_3dhalfnarrow():
+    lb = np.array([-8, 1.0], dtype=float)
+    ub = np.array([8, 8], dtype=float)
+    for i in range(150):
+        pos = np.random.rand(2,)*(ub-lb)+lb
+        pos = pos.tolist()
+        size = (1, 1)
+        predefined_obstacles['3d_halfnarrow'].append(('rect', pos, size))
+
+setup_7d_narrow()
+setup_3dhalfnarrow()
 
 def main(
         env_name: str = '3d_halfnarrow',
@@ -65,52 +93,18 @@ def main(
         num_class: int = 2,
         dof: int = 3,
         num_init_points: int = 8000,
-        random_seed: int = 2021,
         width: float = 0.3,
-        generate_random_cfgs: bool = True) -> None:
+        link_length: float = 1.0,
+        generate_random_cfgs: bool = True,
+        random_seed: int = 2021) -> None:
     torch.manual_seed(random_seed)
     np.random.seed(random_seed)
-
-    if env_name == '7d_narrow':
-        obstacles = []
-        lb = np.array([-8, 1.0], dtype=float)
-        ub = np.array([8, 8], dtype=float)
-        for i in range(150):
-            pos = np.random.rand(2,)*(ub-lb)+lb
-            pos = pos.tolist()
-            size = (1, 1)
-            obstacles.append(('rect', pos, size))
-        
-        lb = np.array([-8, -8], dtype=float)
-        ub = np.array([8, -1.0], dtype=float)
-        for i in range(150):
-            pos = np.random.rand(2,)*(ub-lb)+lb
-            pos = pos.tolist()
-            size = (1, 1)
-            obstacles.append(('rect', pos, size))
-        link_length = 1
-    elif env_name == '3d_halfnarrow':
-        obstacles = []
-        lb = np.array([-8, 1.0], dtype=float)
-        ub = np.array([8, 8], dtype=float)
-        for i in range(150):
-            pos = np.random.rand(2,)*(ub-lb)+lb
-            pos = pos.tolist()
-            size = (1, 1)
-            obstacles.append(('rect', pos, size))
-
-        link_length = 2.5
-    else:
-        obstacles = predefined_obstacles[env_name]
-        lengths = {2: 3.5, 3: 2, 7:1}
-        link_length = lengths[dof]
-    
-    robot = RevolutePlanarRobot(link_length, width, dof) # (7, 1), (2, 3)
-
+    obstacles = predefined_obstacles[env_name]
+    robot = RevolutePlanarRobot(link_length, width, dof)
     generate_data_planar_manipulators(robot, folder, obstacles, label_type=label_type,
         num_class=num_class, num_points=num_init_points, env_id=env_name, vis=True,
         generate_random_cfgs=generate_random_cfgs)
-    return
+
 
 if __name__ == "__main__":
     desc = '2D data generation'
