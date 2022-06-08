@@ -117,6 +117,7 @@ if __name__ == "__main__":
     parser.add_argument('--dof', help='degrees of freedom', choices=[2, 3, 7], default=3, type=int)
     parser.add_argument('--num-init-points', type=int, default=8000)
     parser.add_argument('--width', help='link width', type=float, default=0.3)
+    parser.add_argument('--link-length', help='link length', type=float, default=2.0)
     parser.add_argument('--random-seed', type=int, default=2021)
     parser.add_argument('--no-random-cfgs', dest='generate_random_cfgs', action='store_false', default=True)
     args = parser.parse_args()
