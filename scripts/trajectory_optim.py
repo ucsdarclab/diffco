@@ -62,9 +62,9 @@ def adam_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
                     }
                     return rec
             else:
-                init_path = torch.from_numpy(np.linspace(start_cfg, target_cfg, num=N_WAYPOINTS)).double()
+                init_path = torch.from_numpy(np.linspace(start_cfg, target_cfg, num=N_WAYPOINTS))
         else:
-            init_path = torch.rand((N_WAYPOINTS, robot.dof)).double()
+            init_path = torch.rand((N_WAYPOINTS, robot.dof))
             init_path = init_path * (robot.limits[:, 1]-robot.limits[:, 0]) + robot.limits[:, 0]
         init_path[0] = start_cfg
         init_path[-1] = target_cfg

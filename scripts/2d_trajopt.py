@@ -348,9 +348,6 @@ def main(
     if dataset_filepath is None:
         dataset_filepath = autogenerate_dataset(3, 5, 'class', '2class_1', random_seed=random_seed)
     robot, cfgs, labels, dists, obstacles = unpack_dataset(dataset_filepath)
-    cfgs = cfgs.double()
-    labels = labels.double()
-    dists = dists.double()
     obstacles = [obs+(i, ) for i, obs in enumerate(obstacles)]
     fkine = robot.fkine
 
