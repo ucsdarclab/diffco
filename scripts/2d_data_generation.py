@@ -97,6 +97,29 @@ def main(
         link_length: float = 1.0,
         generate_random_cfgs: bool = True,
         random_seed: int = 2021) -> None:
+    """Main entry point for the script. Loads the desired set of obstacles,
+    generates the corresponding dataset, and saves it to a file in the specified
+    folder.
+    
+    Args:
+        env_name (str): A short, unique description of the environment. Defaults
+            to 3d_halfnarrow.
+        folder (str): The folder to save the dataset in. Defaults to
+            'data/landscape'.
+        label_type (str): The obstacle label type. Must be one of 'binary',
+            'class', or 'instance'. Defaults to 'binary'.
+        num_class (int): If label_type is 'class', the total number of classes
+            to create. Defaults to 2.
+        dof (int): Number of degrees of freedom. Defaults to 3.
+        num_init_points (int): Number of init points. Defaults to 8000.
+        width (float): The width of each robot link. Defaults to 0.3.
+        link_length (float): The length of each robot link. Defaults to 1.0.
+        generate_random_cfgs (bool): Flag for determining whether to generate
+            random configs or not. Defaults to True. Should be set to False when
+            doing a compare test with FCL.
+        random_seed (int): Random seed used to reproduce the same results,
+            useful for debugging. Defaults to 2021.
+    """
     torch.manual_seed(random_seed)
     np.random.seed(random_seed)
     obstacles = predefined_obstacles[env_name]
