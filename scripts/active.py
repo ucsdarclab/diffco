@@ -1,3 +1,4 @@
+import os
 import sys
 import json
 from os.path import join, isdir, isfile
@@ -14,6 +15,8 @@ from scipy import ndimage
 from matplotlib import animation
 from matplotlib.patches import Rectangle, FancyBboxPatch, Circle
 import seaborn as sns
+
+from scripts.distest_error_vis import autogenerate_dataset, unpack_dataset
 sns.set()
 import matplotlib.patheffects as path_effects
 from diffco import utils
@@ -529,17 +532,18 @@ def escape(robot, dist_est, start_cfg):
     return torch.stack(path_history, dim=0)# sum(trial_histories, []),
 
 
-def main(checking_method='diffco'):
-    DOF = 2
-    env_name = '1rect_active' # '2rect' # '1rect_1circle' '1rect' 'narrow' '2instance'
-
-    dataset = torch.load('data/2d_{}dof_{}.pt'.format(DOF, env_name))
-    cfgs = dataset['data'].double()
-    labels = dataset['label'].reshape(-1, 1).double() #.max(1).values
-    dists = dataset['dist'].reshape(-1, 1).double() #.max(1).values
-    obstacles = dataset['obs']
+def main(
+        checking_method: str = 'diffco',
+        dataset_filepath: str = None,
+        random_seed: int = 1918) -> None:
+    if dataset_filepath is None:
+        dataset_filepath = autogenerate_dataset(2, 1, 'binary', '1rect_active', link_length=3.5, random_seed=random_seed)
+    description = os.path.splitext(os.path.basename(dataset_filepath))[0]  # Remove the .pt extension
+    robot, cfgs, labels, dists, obstacles = unpack_dataset(dataset_filepath)
+    cfgs = cfgs.double()
+    labels = labels.reshape(-1, 1).double() #.max(1).values
+    dists = dists.reshape(-1, 1).double() #.max(1).values
     obstacles = [list(o) for o in obstacles]
-    robot = dataset['robot'](*dataset['rparam'])
     width = robot.link_width
 
     #=================================================================================================================================
@@ -553,9 +557,8 @@ def main(checking_method='diffco'):
     nu = 5 #5
     kai = 1500
     sigma = 0.3
-    seed = 1918
-    torch.manual_seed(seed)
-    np.random.seed(seed)
+    torch.manual_seed(random_seed)
+    np.random.seed(random_seed)
     
     num_init_points = 8000
     if label_type == 'binary':
@@ -662,7 +665,7 @@ def main(checking_method='diffco'):
                 'N_WAYPOINTS': 20,
                 'NUM_RE_TRIALS': 5,
                 'MAXITER': 200,
-                'seed': seed,
+                'seed': random_seed,
                 'history': False
             }
             dist_func = lambda x: gt_checker.predict(x)[1]
@@ -673,7 +676,7 @@ def main(checking_method='diffco'):
                 'MAXITER': 200,
                 'safety_margin': 0, #max(1/5*min_score, -0.5),
                 'max_speed': 1.5,
-                'seed': seed,
+                'seed': random_seed,
                 'history': False
             }
             dist_func = lambda x: dist_est(x)-options['safety_margin']
@@ -703,10 +706,10 @@ def main(checking_method='diffco'):
             # ============================
             plan_ts.append(time()-ot)
 
-            # path_dir = 'results/active_learning/path_2d_{}dof_{}_seed{}_step{:02d}.json'.format(robot.dof, env_name, seed, t) # DEBUGGING
-            path_dir = f'results/active_learning/{seed}/{checking_method}'
+            # path_dir = f'results/active_learning/path_{description}_seed{random_seed}_step{t:02d}.json' # DEBUGGING
+            path_dir = f'results/active_learning/{random_seed}/{checking_method}'
             makedirs(path_dir, exist_ok=True)
-            filename = f'path_2d_{robot.dof}dof_{env_name}_checker={checking_method}_seed{seed}_step{t:02d}.json'
+            filename = f'path_{description}_checker={checking_method}_seed{random_seed}_step{t:02d}.json'
             with open(join(path_dir, filename), 'w') as f:
                 json.dump(solution_rec, f, indent=1)
                 print('Plan recorded in {}'.format(f.name))
@@ -723,8 +726,8 @@ def main(checking_method='diffco'):
             p = utils.make_continue(p)
             
             #animation
-            # vid_name = None #'results/maual_trajopt_2d_{}dof_{}_fitting_{}_eps_{}_dif_{}_updates_{}_steps_{}.mp4'.format(
-            #     # robot.dof, env_name, fitting_target, Epsilon, dif_weight, UPDATE_STEPS, N_STEPS)
+            # vid_name = None #'results/maual_trajopt_{}_fitting_{}_eps_{}_dif_{}_updates_{}_steps_{}.mp4'.format(
+            #     # robot.dof, description, fitting_target, Epsilon, dif_weight, UPDATE_STEPS, N_STEPS)
             # if robot.dof == 2:
             #     animation_demo(
             #         robot, p, fig, link_plot, joint_plot, eff_plot, 
@@ -735,11 +738,11 @@ def main(checking_method='diffco'):
             # single shot
             single_plot(robot, p, fig, link_plot, joint_plot, eff_plot, cfg_path_plots=cfg_path_plots, ax=ax)
             # plt.show()
-            # plt.savefig('figs/path_2d_{}dof_{}.png'.format(robot.dof, env_name), dpi=500)
-            # plt.savefig('figs/active_2d_{}dof_{}_{}'.format(robot.dof, env_name, t), dpi=500)
-            fig_dir = f'figs/active/{seed}/{checking_method}'
+            # plt.savefig(f'figs/path_{description}.png', dpi=500)
+            # plt.savefig(f'figs/active_{description}_{t}', dpi=500)
+            fig_dir = f'figs/active/{random_seed}/{checking_method}'
             makedirs(fig_dir, exist_ok=True)
-            plt.savefig(join(fig_dir, f'2d_{robot.dof}dof_{env_name}_{checking_method}_{t:02d}'), dpi=300)
+            plt.savefig(join(fig_dir, f'{description}_{checking_method}_{t:02d}'), dpi=300)
     
     print('='*20)
     print('{} summary:'.format(checking_method))
