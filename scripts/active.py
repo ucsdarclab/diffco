@@ -536,6 +536,17 @@ def main(
         checking_method: str = 'diffco',
         dataset_filepath: str = None,
         random_seed: int = 1918) -> None:
+    """Main entry point for the script. Loads the a dataset (autogenerates one
+    if necessary), trains the collision checker at several snapshots, and saves
+    the trajectories and figures for each corresponding snapshot.
+    
+    Args:
+        checking_method (str): The collision checker to use (DiffCo or FCL).
+            Must be one of 'diffco' or 'fcl'. Defaults to 'diffco'.
+        dataset_filepath (str): Path to dataset.
+        random_seed (int): Random seed used to reproduce the same results,
+            useful for debugging. Defaults to 1918.
+    """
     if dataset_filepath is None:
         dataset_filepath = autogenerate_dataset(2, 1, 'binary', '1rect_active', link_length=3.5, random_seed=random_seed)
     description = os.path.splitext(os.path.basename(dataset_filepath))[0]  # Remove the .pt extension
