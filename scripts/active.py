@@ -1,3 +1,4 @@
+import argparse
 import os
 import sys
 import json
@@ -768,5 +769,10 @@ def main(
 
 
 if __name__ == "__main__":
-    # main(checking_method='diffco')
-    main(checking_method='fcl')
+    desc = 'Tool for generating and plotting trajectories in 2D environments with moving obstacles.'
+    parser = argparse.ArgumentParser(description=desc)
+    parser.add_argument(dest='checking_method', choices=['diffco', 'fcl'], help='Checking method')
+    parser.add_argument('--dataset', dest='dataset_filepath', help='Dataset filepath')
+    parser.add_argument('--random-seed', type=int, default=1918, help='Random seed')
+    args = parser.parse_args()
+    main(**vars(args))
