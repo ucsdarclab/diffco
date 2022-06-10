@@ -1,8 +1,3 @@
-'''
-This is a script that comprises several small experiments/demos in the paper.
-The best to use this is to comment/uncomment certain lines depending on the purpose.
-'''
-
 import argparse
 import os
 import pickle
@@ -161,7 +156,19 @@ def create_plots(
     
     return est_grid.reshape(-1), c_axes
 
-def generate_unified_grid(width: int = 400, height: int = 400):
+def generate_unified_grid(width: int = 400, height: int = 400) -> torch.Tensor:
+    """Generate uniformly distributed grid points. DiffCo can be more accurately
+    compared with FCL's performance when a grid like this is used for inference.
+
+    Args:
+        width (int): The width of the grid (number of points). Defaults to 400.
+        height (int): The height of the grid (number of points). Usually the
+            grid is square, so height should be the same as width. Defaults to
+            400.
+
+    Returns:
+        torch.Tensor: The grid points.
+    """
     yy, xx = torch.meshgrid(torch.linspace(-np.pi, np.pi, width), torch.linspace(-np.pi, np.pi, height), indexing='ij')
     grid_points = torch.stack([xx, yy], axis=2).reshape((-1, 2))
     return grid_points
