@@ -18,8 +18,10 @@ Use the script `distest_error_vis.py` to generate correlation and FCL comparison
 ```
 python scripts/distest_error_vis.py correlate
 ```
-<img src="assets/experiments-demo-img/correlate_example1_dataset.png" width="300"/>
-<img src="assets/experiments-demo-img/correlate_example1.png" width="300"/>
+<div>
+    <img src="assets/experiments-demo-img/correlate_example1_dataset.png" width="300"/>
+    <img src="assets/experiments-demo-img/correlate_example1.png" width="300"/>
+</div>
 
 ```
 python scripts/distest_error_vis.py compare
@@ -94,16 +96,20 @@ Use the script `active.py` to generate trajectories and figures for snapshots of
 ```
 python scripts/active.py diffco
 ```
-<img src="assets/experiments-demo-img/active_diffco_example1.png" width="300"/>
-<img src="assets/experiments-demo-img/active_diffco_example2.png" width="300"/>
-<img src="assets/experiments-demo-img/active_diffco_example3.png" width="300"/>
+<div>
+    <img src="assets/experiments-demo-img/active_diffco_example1.png" width="300"/>
+    <img src="assets/experiments-demo-img/active_diffco_example2.png" width="300"/>
+    <img src="assets/experiments-demo-img/active_diffco_example3.png" width="300"/>
+</div>
 
 ```
 python scripts/active.py fcl
 ```
-<img src="assets/experiments-demo-img/active_fcl_example1.png" width="300"/>
-<img src="assets/experiments-demo-img/active_fcl_example2.png" width="300"/>
-<img src="assets/experiments-demo-img/active_fcl_example3.png" width="300"/>
+<div>
+    <img src="assets/experiments-demo-img/active_fcl_example1.png" width="300"/>
+    <img src="assets/experiments-demo-img/active_fcl_example2.png" width="300"/>
+    <img src="assets/experiments-demo-img/active_fcl_example3.png" width="300"/>
+</div>
 
 ### 3D environment
 Documentation coming soon.
