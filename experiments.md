@@ -78,7 +78,7 @@ python scripts/2d_trajopt.py -d data/landscape/2d_7dof_2obs_class_2class_2.pt --
 
 The script also generates a video animation.
 
-![trajectory optimization video example](assets/experiments-demo-img/trajopt_example4.mp4)
+![trajectory optimization video example](https://user-images.githubusercontent.com/12199891/173008550-5f65b031-f5d4-43c8-a93a-e634b492a74d.mp4)
 
 
 
