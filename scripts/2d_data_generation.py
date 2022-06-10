@@ -57,7 +57,8 @@ predefined_obstacles = {
     '3d_halfnarrow': [],
 }
 
-def setup_7d_narrow():
+def setup_7d_narrow() -> None:
+    """Generate obstacles for 7d_narrow environment."""
     lb = np.array([-8, 1.0], dtype=float)
     ub = np.array([8, 8], dtype=float)
     for i in range(150):
@@ -74,7 +75,8 @@ def setup_7d_narrow():
         size = (1, 1)
         predefined_obstacles['7d_narrow'].append(('rect', pos, size))
 
-def setup_3dhalfnarrow():
+def setup_3d_halfnarrow() -> None:
+    """Generate obstacles for 3d_halfnarrow environment."""
     lb = np.array([-8, 1.0], dtype=float)
     ub = np.array([8, 8], dtype=float)
     for i in range(150):
@@ -84,7 +86,7 @@ def setup_3dhalfnarrow():
         predefined_obstacles['3d_halfnarrow'].append(('rect', pos, size))
 
 setup_7d_narrow()
-setup_3dhalfnarrow()
+setup_3d_halfnarrow()
 
 def main(
         env_name: str = '3d_halfnarrow',
