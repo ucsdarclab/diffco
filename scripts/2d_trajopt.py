@@ -346,7 +346,8 @@ def main(
             useful for debugging. Defaults to 19961221.
     """
     if dataset_filepath is None:
-        dataset_filepath = autogenerate_dataset(3, 5, 'class', '2class_1', random_seed=random_seed)
+        dataset_filepath = autogenerate_dataset(3, 5, 'class', '2class_1', link_length=2,
+            random_seed=random_seed)
     robot, cfgs, labels, dists, obstacles = unpack_dataset(dataset_filepath)
     obstacles = [obs+(i, ) for i, obs in enumerate(obstacles)]
     fkine = robot.fkine

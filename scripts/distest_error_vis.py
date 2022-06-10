@@ -232,9 +232,10 @@ def main(
         np.random.seed(random_seed)
     if dataset_filepath is None:
         if task == 'correlate':
-            dataset_filepath = autogenerate_dataset(3, 150, 'binary', '3d_halfnarrow', random_seed=random_seed)
+            dataset_filepath = autogenerate_dataset(3, 150, 'binary', '3d_halfnarrow',
+                link_length=2.5, random_seed=random_seed)
         elif task == 'compare':
-            dataset_filepath = autogenerate_dataset(2, 1, 'binary', '1rect', 160000, False, random_seed)
+            dataset_filepath = autogenerate_dataset(2, 1, 'binary', '1rect', 160000, 3, False, random_seed)
         else:
             raise ValueError(task)
     robot, cfgs, labels, dists, obstacles = unpack_dataset(dataset_filepath)
@@ -626,7 +627,6 @@ if __name__ == "__main__":
     parser.add_argument('--pretrained-checker', help='path to pretrained collision checker', type=str, default=None)
     parser.add_argument('-d', '--dataset', dest='dataset_filepath', help='Dataset filepath')
     parser.add_argument('-l', '--lambdas', dest='lmbda', help='# of lambdas for DiffCo kernel', type=int, default=10)
-    parser.add_argument('--keep-all', action='store_true', default=False)
     parser.add_argument('--no-fk', dest='use_fk', action='store_false', default=True)
     parser.add_argument('--fitting-target', choices=['label', 'dist', 'hypo'], default='label')
     parser.add_argument('--fitting-epsilon', type=float, default=0.01)
