@@ -136,8 +136,6 @@ class MultiDiffCo(DiffCo):
             y = self.y
         self.rbf_kernel = kernel.MultiQuadratic(1) if kernel_func is None else kernel_func
         kmat = self.rbf_kernel(X, X)
-        print(X.shape)
-        print(kmat.shape)
 
         # min_d, min_i = (kmat+torch.eye(len(kmat)).fill_diagonal_(float('inf'))).min(dim=0)
         # plt.plot(range(len(kmat)), min_d)
@@ -150,8 +148,7 @@ class MultiDiffCo(DiffCo):
             cidx = c_iszero.repeat([len(c_nonzero), 1]).reshape(-1)
             kmat[ridx, cidx] = 0
             kmat[cidx, ridx] = 0
-        print(y.dtype, kmat.dtype)
-        self.rbf_nodes = torch.solve(y, kmat+reg*torch.eye(len(kmat), dtype=kmat.dtype)).solution
+        self.rbf_nodes = torch.linalg.solve(kmat+reg*torch.eye(len(kmat), dtype=kmat.dtype), y)
         for c in range(self.num_class):
             self.rbf_nodes[self.gains == 0] = 0
         assert self.rbf_nodes.shape == (len(self.support_points), self.num_class)
