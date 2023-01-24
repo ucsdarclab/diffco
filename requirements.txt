@@ -7,3 +7,4 @@ tqdm
 python-fcl
 seaborn
 pyyaml
+trimesh

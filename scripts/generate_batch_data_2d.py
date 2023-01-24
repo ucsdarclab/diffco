@@ -1,25 +1,20 @@
-import sys
-# sys.path.append('/home/yuheng/DiffCo/')
 import os
 from time import time
 
-import numpy as np
-from numpy.random import rand, randint
-import torch
 import fcl
-from scipy import ndimage
-from matplotlib import animation
-from matplotlib.patches import Rectangle, FancyBboxPatch, Circle
+import numpy as np
 import seaborn as sns
-sns.set()
-import matplotlib.patheffects as path_effects
-
-from diffco import DiffCo
-from diffco import kernel
-from matplotlib import pyplot as plt
+import torch
 from diffco.model import RevolutePlanarRobot
-from diffco import utils
 from diffco.Obstacles import FCLObstacle
+from matplotlib import pyplot as plt
+from matplotlib.patches import Circle, Rectangle
+from numpy.random import rand, randint
+from tqdm import tqdm
+
+from distest_error_vis import generate_unified_grid
+
+sns.set()
 
 def create_plots(robot, obstacles, cfg=None):
     from matplotlib.cm import get_cmap
@@ -61,49 +56,39 @@ def create_plots(robot, obstacles, cfg=None):
     joint_plot, = ax.plot(points[:-1, 0], points[:-1, 1], 'o', color='tab:red', markersize=lw)
     eff_plot, = ax.plot(points[-1:, 0], points[-1:, 1], 'o', color='black', markersize=lw)
 
-def generate_one(robot, folder, obs_num, obstacles=None, label_type='binary', num_class=None, num_points=8000, env_id='', vis=True):
+def generate_obstacles_for_planar_manipulators(obs_num: int) -> list:
+    """Generate random obstacles for 2D planar manipulators.
+    """
     types = ['rect', 'circle']
     link_length = robot.link_length[0].item()
-    if obstacles is None:
-        obstacles = []
-        for i in range(obs_num):
-            obs_t = types[randint(2)]
-            if types[0] in obs_t: # rectangle, size = 0.5-3.5, pos = -7~7
-                while True:
-                    s = rand(2) * 3 + 0.5
-                    if obs_num <= 2:
-                        p = rand(2) * 10 - 5
-                    else:
-                        p = rand(2) * 14 - 7
-                    if any(p-s/2 > link_length) or any(p+s/2 < -link_length): # the near-origin area is clear
-                        break
-            elif types[1] in obs_t: # circle, size = 0.25-2, pos = -7~7
-                while True:
-                    s = rand() * 1.75 + 0.25
-                    if obs_num <= 2:
-                        p = rand(2) * 10 - 5
-                    else:
-                        p = rand(2) * 14 - 7
-                    if np.linalg.norm(p) > s+link_length:
-                        break
-            obstacles.append((obs_t, p, s))
-    
-    os.makedirs(folder, exist_ok=True)
-    if vis:
-        create_plots(robot, obstacles, cfg=None) 
-        plt.savefig(os.path.join(
-            folder, '2d_{}dof_{}obs_{}_{}.png'.format(robot.dof, obs_num, label_type, env_id)), 
-            dpi=200)
-        plt.close()
-    
-    # return
-    
+    obstacles = []
+    for i in range(obs_num):
+        obs_t = types[randint(2)]
+        if types[0] in obs_t: # rectangle, size = 0.5-3.5, pos = -7~7
+            while True:
+                s = rand(2) * 3 + 0.5
+                if obs_num <= 2:
+                    p = rand(2) * 10 - 5
+                else:
+                    p = rand(2) * 14 - 7
+                if any(p-s/2 > link_length) or any(p+s/2 < -link_length): # the near-origin area is clear
+                    break
+        elif types[1] in obs_t: # circle, size = 0.25-2, pos = -7~7
+            while True:
+                s = rand() * 1.75 + 0.25
+                if obs_num <= 2:
+                    p = rand(2) * 10 - 5
+                else:
+                    p = rand(2) * 14 - 7
+                if np.linalg.norm(p) > s+link_length:
+                    break
+        obstacles.append((obs_t, p, s))
+    return obstacles
+
+def generate_labels(label_type: str, obstacles: list, num_points: int, num_class: int = None):
     fcl_obs = [FCLObstacle(*param) for param in obstacles]
     fcl_collision_obj = [fobs.cobj for fobs in fcl_obs]
     # geom2instnum = {id(g): i for i, (_, g) in enumerate(fcl_obs)}
-
-    cfgs = torch.rand((num_points, robot.dof), dtype=torch.float32)
-    cfgs = cfgs * (robot.limits[:, 1]-robot.limits[:, 0]) + robot.limits[:, 0]
     if label_type == 'binary':
         labels = torch.zeros(num_points, 1, dtype=torch.float)
         dists = torch.zeros(num_points, 1, dtype=torch.float)
@@ -117,6 +102,8 @@ def generate_one(robot, folder, obs_num, obstacles=None, label_type='binary', nu
         for mng, cobj in zip(obs_managers, fcl_collision_obj):
             mng.registerObjects([cobj])
     elif label_type == 'class':
+        if not num_class:
+            raise TypeError('num_class must not be None if label_type is "class"')
         labels = torch.zeros(num_points, num_class, dtype=torch.float)
         dists = torch.zeros(num_points, num_class, dtype=torch.float)
         obs_managers = [fcl.DynamicAABBTreeCollisionManager() for _ in range(num_class)]
@@ -125,7 +112,29 @@ def generate_one(robot, folder, obs_num, obstacles=None, label_type='binary', nu
             obj_by_cls[obj.category].append(obj.cobj)
         for mng, obj_group in zip(obs_managers, obj_by_cls):
             mng.registerObjects(obj_group)
+    else:
+        raise ValueError(label_type)
     
+    return labels, dists, obs_managers
+
+def detect_collisions(
+        robot,
+        labels: torch.Tensor,
+        dists: torch.Tensor,
+        obs_managers: list,
+        obs_num: int,
+        num_points: int,
+        label_type: str, 
+        env_id: str = '',
+        generate_random_cfgs: bool = True):
+    if generate_random_cfgs:
+        cfgs = torch.rand((num_points, robot.dof), dtype=torch.float32)
+        cfgs = cfgs * (robot.limits[:, 1]-robot.limits[:, 0]) + robot.limits[:, 0]
+    else:
+        assert robot.dof == 2, f"Expected 2 degrees of freedom, got {robot.dof}"
+        num_points_sqrt = int(np.sqrt(num_points))
+        assert num_points == num_points_sqrt ** 2, "Expected num of init points to be a perfect square!"
+        cfgs = generate_unified_grid(num_points_sqrt, num_points_sqrt)
     robot_links = robot.update_polygons(cfgs[0])
     robot_manager = fcl.DynamicAABBTreeCollisionManager()
     robot_manager.registerObjects(robot_links)
@@ -136,7 +145,7 @@ def generate_one(robot, folder, obs_num, obstacles=None, label_type='binary', nu
     
     times = []
     st = time()
-    for i, cfg in enumerate(cfgs):
+    for i, cfg in tqdm(enumerate(cfgs), total=len(cfgs), desc="Generating dataset"):
         st1 = time()
         robot.update_polygons(cfg)
         robot_manager.update()
@@ -161,20 +170,56 @@ def generate_one(robot, folder, obs_num, obstacles=None, label_type='binary', nu
     if label_type == 'binary':
         labels = labels.squeeze_(1)
         dists = dists.squeeze_(1)
-    print('env_id {}, {} collisons, {} free'.format(
+    print('env_id {}, {} collisions, {} free'.format(
         env_id, torch.sum(in_collision==1), torch.sum(in_collision==0)))
     if torch.sum(in_collision==1) == 0:
         print('0 Collision. You may want to regenerate env {}obs{}'.format(obs_num, env_id))
+    return robot, cfgs, labels, dists
+
+def build_dataset(robot, obstacles: list, num_points: int, num_class: int, label_type: str, env_id: str, generate_random_cfgs: bool = True):
+    labels, dists, obs_managers = generate_labels(label_type, obstacles, num_points, num_class)
+    robot, cfgs, labels, dists = detect_collisions(robot, labels, dists, obs_managers, len(obstacles), num_points, label_type, env_id, generate_random_cfgs)
+    return robot, cfgs, labels, dists
+
+def generate_data_planar_manipulators(
+        robot,
+        folder: str,
+        obstacles: list = None,
+        obs_num: int = None,
+        label_type: str = 'binary',
+        num_class: int = None,
+        num_points: int = 8000,
+        env_id: str = '',
+        vis: bool = True,
+        generate_random_cfgs: bool = True):
+    """Generate dataset for a 2D planar manipulator robot.
+    """
+    if obstacles is not None and obs_num is not None:
+        assert len(obstacles) == obs_num
+    if obstacles is None:
+        assert obs_num is not None
+        obstacles = generate_obstacles_for_planar_manipulators(obs_num)
+    if obs_num is None:
+        assert obstacles is not None
+        obs_num = len(obstacles)
+    robot, cfgs, labels, dists = build_dataset(robot, obstacles, num_points, num_class, label_type, env_id, generate_random_cfgs)
 
     dataset = {
         'data': cfgs, 'label': labels, 'dist': dists, 'obs': obstacles, 
         'robot': robot.__class__, 'rparam': [robot.link_length, robot.link_width, robot.dof, ]
     }
+    os.makedirs(folder, exist_ok=True)
     torch.save(dataset, os.path.join(
-        folder, '2d_{}dof_{}obs_{}_{}.pt'.format(robot.dof, obs_num, label_type, env_id)))
-    
-    return 
-        
+        folder, '2d_{}dof_{}obs_{}_{}.pt'.format(robot.dof, len(obstacles), label_type, env_id)))
+
+    if vis:
+        create_plots(robot, obstacles, cfg=None) 
+        plt.savefig(os.path.join(
+            folder, '2d_{}dof_{}obs_{}_{}.png'.format(robot.dof, len(obstacles), label_type, env_id)), 
+            dpi=200)
+        plt.close()
+
+    return
 
 
 if __name__ == "__main__":
@@ -216,4 +261,4 @@ if __name__ == "__main__":
             #         if torch.sum(labels==1) != 0:
             #             continue
             # ==============================================================
-            generate_one(robot, num_obs, folder_name, num_points=8000, env_id='{:02d}'.format(env_id), vis=True)
+            generate_data_planar_manipulators(robot, folder_name, obs_num=num_obs, num_points=8000, env_id='{:02d}'.format(env_id), vis=True)

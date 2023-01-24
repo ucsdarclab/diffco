@@ -128,8 +128,9 @@ def dense_path(q, max_step=2.0):
     for i in range(len(q)-1):
         delta = q[i+1] - q[i]
         dist = delta.norm()
-        num_steps = torch.ceil(dist/max_step)
-        denseq.append(q[i] + torch.arange(num_steps).reshape(-1, 1) * delta * max_step/dist)
+        num_steps = torch.ceil(dist/max_step).item()
+        irange = torch.arange(num_steps).reshape(-1, 1).to(q.device)
+        denseq.append(q[i] + irange * delta * max_step/dist)
     denseq.append(q[-1:])
     denseq = torch.cat(denseq)
     assert torch.all(denseq[0] == q[0]) and torch.all(denseq[-1] == q[-1])
