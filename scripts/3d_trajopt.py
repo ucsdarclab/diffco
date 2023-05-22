@@ -27,9 +27,9 @@ from diffco import utils
 from diffco.model import BaxterLeftArmFK
 
 
-class DiffCoplusBaxterExperiments(object):
-    def __init__(self):
-        super(DiffCoplusBaxterExperiments, self).__init__()
+class DiffCo3DRobotExperiments(object):
+    def __init__(self, robot_name, group_name):
+        super(DiffCo3DRobotExperiments, self).__init__()
 
         ## BEGIN_SUB_TUTORIAL setup
         ##
@@ -52,7 +52,7 @@ class DiffCoplusBaxterExperiments(object):
         ## If you are using a different robot, change this value to the name of your robot
         ## arm planning group.
         ## This interface can be used to plan and execute motions:
-        group_name =  'panda_arm' #'both_arms' # 'panda_arm' # baxter: "left_arm"
+        # group_name =  'panda_arm' #'both_arms' # 'panda_arm' # baxter: "left_arm"
         move_group = moveit_commander.MoveGroupCommander(group_name)
 
         ## Create a `DisplayTrajectory`_ ROS publisher which is used to display
@@ -69,7 +69,15 @@ class DiffCoplusBaxterExperiments(object):
         # self.goal_pub = rospy.Publisher('/rviz/moveit/update_goal_state', Empty, 1)
         self.pos = [0 for _ in range(9)]
         self.state = JointState()
-        self.state.name = [f'panda_joint{j}' for j in range(1, 8)]+['panda_finger_joint1', 'panda_finger_joint2']
+        if robot_name == 'baxter' and group_name == 'left_arm':
+            self.state_name = ['left_s0', 'left_s1', 'left_e0', 'left_e1', 'left_w0', 'left_w1', 'left_w2']
+        elif robot_name == 'baxter' and group_name == 'right_arm':
+            self.state_name = ['right_s0', 'right_s1', 'right_e0', 'right_e1', 'right_w0', 'right_w1', 'right_w2']
+        elif robot_name == 'baxter' and group_name == 'both_arms':
+            self.state_name = ['left_s0', 'left_s1', 'left_e0', 'left_e1', 'left_w0', 'left_w1', 'left_w2',
+                            'right_s0', 'right_s1', 'right_e0', 'right_e1', 'right_w0', 'right_w1', 'right_w2']
+        elif robot_name == 'panda' and group_name == 'panda_arm':
+            self.state.name = [f'panda_joint{j}' for j in range(1, 8)]+['panda_finger_joint1', 'panda_finger_joint2']
         # ['left_s0', 'left_s1', 'left_e0', 'left_e1', 'left_w0', 'left_w1', 'left_w2']
         self.state.position = self.pos
         self.state_pub_thread = threading.Thread(target=self.pub_state)
@@ -392,7 +400,7 @@ def animate_path(p, obstacles):
     # This function is not recommended. 
     # You should use the single_shot function to display a trajectory
     # and use the sliding bar to animate it in rViz
-    exp = DiffCoplusBaxterExperiments()
+    exp = DiffCo3DRobotExperiments()
     print('Adding box')
     rospy.sleep(2)
 
@@ -419,14 +427,18 @@ def animate_path(p, obstacles):
     
     return box_names, exp
 
-def single_shot(path, obstacles):
-    exp = DiffCoplusBaxterExperiments()
+def single_shot(path, obstacles, robot_name='panda', group_name='panda_arm',):
+    if robot_name == 'panda':
+        joint_names = [f'panda_joint{j}' for j in range(1, 8)]#+['panda_finger_joint1', 'panda_finger_joint2'] # panda
+    elif robot_name == 'baxter' and group_name == 'left_arm':
+        joint_names = ['left_s0', 'left_s1', 'left_e0', 'left_e1', 'left_w0', 'left_w1', 'left_w2',]
+    elif robot_name == 'baxter' and group_name == 'both_arms':
+        joint_names = ['left_s0', 'left_s1', 'left_e0', 'left_e1', 'left_w0', 'left_w1', 'left_w2',
+            'right_s0', 'right_s1', 'right_e0', 'right_e1', 'right_w0', 'right_w1', 'right_w2']
+    
+    exp = DiffCo3DRobotExperiments(robot_name, group_name)
     # print('Adding box')
     # rospy.sleep(2)
-
-    joint_names = [f'panda_joint{j}' for j in range(1, 8)]#+['panda_finger_joint1', 'panda_finger_joint2'] # panda
-    # joint_names = ['left_s0', 'left_s1', 'left_e0', 'left_e1', 'left_w0', 'left_w1', 'left_w2',
-    #     'right_s0', 'right_s1', 'right_e0', 'right_e1', 'right_w0', 'right_w1', 'right_w2']
 
     
     # start_state = JointState()
@@ -471,6 +483,7 @@ def single_shot(path, obstacles):
     pub = exp.display_trajectory_publisher
     
     joint_traj = JointTrajectory()
+    print(f'Robot: {robot_name}')
     print(f'Displayed path length: {len(path)}')
     for q in path:
         traj_point = JointTrajectoryPoint()
@@ -480,7 +493,7 @@ def single_shot(path, obstacles):
     robot_traj = RobotTrajectory()
     robot_traj.joint_trajectory = joint_traj
     disp_traj = DisplayTrajectory()
-    disp_traj.model_id = 'panda' # 'baxter' # 'panda'
+    disp_traj.model_id = robot_name
     disp_traj.trajectory.append(robot_traj)
     disp_traj.trajectory_start.joint_state.position = path[0] # torch.cat([path[1], torch.FloatTensor([0.035, 0.035])]).numpy()
     disp_traj.trajectory_start.joint_state.name = joint_traj.joint_names
@@ -515,43 +528,7 @@ def escape(robot, dist_est, start_cfg, options):
             break
     return torch.stack(path_history, dim=0)
 
-
-def main():
-    robot_name = 'panda' # [baxter, panda]
-    env_name = 'bookshelvessmall' # '2objontable' # 'medium' # 'bookshelvessmall' # 'catontable' #'complex' # 'table' 'self'
-    filename = None # 'data/3d_baxter_self_both_arms.pt'
-    if filename is None:
-        dataset = torch.load('data/3d_{}_{}.pt'.format(robot_name, env_name))
-    else:
-        dataset = torch.load(filename)
-    cfgs = dataset['data']
-    cfgs = cfgs.type(torch.float)
-    labels = dataset['label']
-    # dists = dataset['dist']
-    obstacles = dataset['obs']
-    robot = dataset['robot']()
-    train_num = int(len(cfgs) * 0.5)
-    fkine = robot.fkine
-    # '''
-    #====
-    # checker = DiffCo(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(1000)), beta=1.0) # kernel.FKKernel(fkine, 
-    # checker.train(cfgs[:train_num], labels[:train_num], max_iteration=len(cfgs[:train_num]))
-    # with open('results/checker_3d_{}_{}.p'.format(robot_name, env_name), 'wb') as f:
-    #     pickle.dump(checker, f)
-    #     print('checker saved: {}'.format(f.name))
-    #==== The following can be used alone to save training time in debugging
-    with open('results/checker_3d_{}_{}.p'.format(robot_name, env_name), 'rb') as f:
-        checker = pickle.load(f)
-        print('checker loaded: {}'.format(f.name))
-
-    fitting_target = 'label' # {label, dist, hypo}
-    Epsilon = 1.0
-    checker.fit_poly(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine)
-    dist_est = checker.rbf_score
-    min_score = dist_est(cfgs[train_num:]).min().item()
-    print('MIN_SCORE = {}'.format(min_score))
-    safety_margin = max(1/3*min_score, -10.0) #
-    
+def eval_model(model, cfgs, labels, train_num=0, safety_margin=0):
     # Check DiffCo test ACC
     test_num = len(cfgs) - train_num
     test_preds = torch.zeros(test_num)
@@ -564,7 +541,7 @@ def main():
     # test_preds = (dist_est(cfgs[train_num:train_num+test_num])-safety_margin > 0) * 2 - 1
     # test_collision(train_num, bs, test_preds, checker, cfgs)
     # print(f'avg {(time()-t0)/test_num} seconds.')
-    test_preds = (dist_est(cfgs[train_num:train_num+test_num])-safety_margin > 0) * 2 - 1
+    test_preds = (model(cfgs[train_num:train_num+test_num])-safety_margin > 0) * 2 - 1
     test_labels = labels[train_num:train_num+test_num].reshape(test_preds.shape)
     test_acc = torch.sum(test_preds == test_labels, dtype=torch.float32)/len(test_preds)
     test_tpr = torch.sum(test_preds[test_labels==1] == 1, dtype=torch.float32) / len(test_preds[test_labels==1])
@@ -573,14 +550,54 @@ def main():
     # assert(test_acc > 0.75)
     # return
 
-    obs_cfgs = cfgs[labels.reshape(-1) == -1]
-    indices = torch.randint(0, len(obs_cfgs), (2, ))
-    while indices[0] == indices[1]:
-        indices = torch.randint(0, len(obs_cfgs), (2, ))
+def load_dataset(robot_name, env_name, filename=None):
+    if filename is None:
+        dataset = torch.load('data/3d_{}_{}.pt'.format(robot_name, env_name))
+    else:
+        dataset = torch.load(filename)
+    cfgs = dataset['data']
+    cfgs = cfgs.type(torch.float)
+    labels = dataset['label']
+    # dists = dataset['dist']
+    obstacles = dataset['obs']
+    robot = dataset['robot']()
+    train_num = int(len(cfgs) * 0.5)
+    fkine = robot.fkine
+    return cfgs, labels, obstacles, robot, train_num, fkine
 
-    ## Setting start and target configurations
+def get_diffco_model(obstacles=None, fkine=None, train_cfgs=None, train_labels=None, load_model=False, robot_name=None, env_name=None):    
+    if not load_model:
+        #====
+        checker = DiffCo(obstacles, kernel_func=kernel.FKKernel(fkine, kernel.RQKernel(1000)), beta=1.0) # kernel.FKKernel(fkine, 
+        checker.train(cfgs[:train_num], labels[:train_num], max_iteration=len(cfgs[:train_num]))
+        with open('results/checker_3d_{}_{}.p'.format(robot_name, env_name), 'wb') as f:
+            pickle.dump(checker, f)
+            print('checker saved: {}'.format(f.name))
+    else:
+        #==== The following can be used alone to save training time in debugging
+        with open('results/checker_3d_{}_{}.p'.format(robot_name, env_name), 'rb') as f:
+            checker = pickle.load(f)
+            print('checker loaded: {}'.format(f.name))
+
+def fit_dist_model(model: DiffCo, fkine, test_cfgs):
+    fitting_target = 'label' # {label, dist, hypo}
+    Epsilon = 1.0
+    model.fit_poly(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine)
+    dist_est = model.rbf_score
+    min_score = dist_est(test_cfgs).min().item()
+    print('MIN_SCORE = {}'.format(min_score))
+    safety_margin = max(1/3*min_score, -10.0) #
+
+    return dist_est, safety_margin
+
+def predefined_start_target_cfgs():
+    # obs_cfgs = cfgs[labels.reshape(-1) == -1]
+    # indices = torch.randint(0, len(obs_cfgs), (2, ))
+    # while indices[0] == indices[1]:
+    #     indices = torch.randint(0, len(obs_cfgs), (2, ))
+
     # start_cfg = torch.FloatTensor([-39, 40, -111, 81, 4, 29, -136])/180*pi # free_cfgs[indices[0]]
-    # start_cfg = torch.FloatTensor([-41, 27, -88, 23, -166, 67, 168])/180*pi # 2obj scene, start from between the objs
+    start_cfg = torch.FloatTensor([-41, 27, -88, 23, -166, 67, 168])/180*pi # 2obj scene, start from between the objs
     # torch.FloatTensor([25, 31, -120, 58, -66, -8, 116])/180*pi # medium scene
     # torch.FloatTensor([5, 51, -126, 58, -66, -8, 116])/180*pi # complex scene, start below objects
     # torch.FloatTensor([-5, 49, -146, 41, -107, -20, 168])/180*pi #2obj scene, start from left side of the objects
@@ -589,7 +606,7 @@ def main():
     # start_cfg = torch.FloatTensor([31, 37, -32, -90, -142, 153, -154]) / 180*pi # Panda, bookshelves, narrow passage 1
     # 
     # torch.FloatTensor([-27, 34, -92, 34, -174, -50, -19]) /180*pi #start from high-risk (basic scene)
-    # target_cfg = torch.FloatTensor([13, 31, -88, 16, -160, -27, 169])/180*pi # 2obj scene, stop beside table
+    target_cfg = torch.FloatTensor([13, 31, -88, 16, -160, -27, 169])/180*pi # 2obj scene, stop beside table
     # torch.FloatTensor([-48, 59, -147, 50, -170, -30, 169])/180*pi #complex scene, end below objects; medium scene
     # torch.FloatTensor([-22, 28, -87, 45, -170, -30, 169])/180*pi #2obj scene, stop on the right of the objects
     # target_cfg = torch.FloatTensor([-111, -83, 95, -84, -16, 149, 137])/180*pi # Panda, bookshelves small, narrow passage 1
@@ -597,16 +614,19 @@ def main():
     # target_cfg = torch.FloatTensor([45, 44, -82, -62, 118, 161, -21]) / 180*pi # Panda, bookshelves, narrow passage 1
     # 
     # torch.FloatTensor([4, 29, -86, 44, 3, 16, -146])/180*pi
-    
-    # This is for trajectory optimization with or w/o an initial guess
+
+    return start_cfg, target_cfg
+
+def exp_optimize_given_path(robot_name, robot, env_name, dist_est, safety_margin, direct_return=False):
     with open('data/{}_{}_rrt.json'.format(robot_name, env_name), 'r') as f:
         init_guess = torch.FloatTensor(json.load(f)['path'])
         # init_guess = torch.cat([init_guess[0:1], init_guess[1:-1:2], init_guess[-1:]], axis=0)
         print(f'Length of initial guess: {len(init_guess)}'.format())
     start_cfg = init_guess[0]
     target_cfg = init_guess[-1]
-    if False:
+    if direct_return:
         p = init_guess
+        pathname = None
         # p = cfgs[labels==1][:100]
         # print(p[62]/pi*180)
         # return
@@ -642,32 +662,77 @@ def main():
             print('Plan recorded in {}'.format(f.name))
             print(f'Optimization took {t_optimize} seconds')
             pathname = f.name
+    
+    return p, pathname
 
-        ## This is for escaping from high-risk region
-        # options_escape = {
-        #     'N_WAYPOINTS': 80,
-        #     'safety_margin': -1.5,
-        #     'lr': 5e-2
-        # }
-        # # start_cfg = torch.FloatTensor([65, 14, 122, -82, 0, 94, 44])/180*np.pi
-        # # start_cfg = torch.FloatTensor([-84, -21, 8, 62, 91, 79, -132, 41, -42, 35, 126, -120, 108, 158])/180*np.pi # baxter, self collision 1
-        # start_cfg = torch.FloatTensor([-12, 28, -95, 85, 147, 1, -27, 22, -21, 48, 97, -51, -42, -14])/180*np.pi # baxter, self collision 2
-        # p = escape(robot, dist_est, start_cfg, options_escape)
-        # pathname = 'results/path_3d_{}_{}_escape2.json'.format(robot_name, env_name)
-        # with open(pathname, 'w') as f:
-        #     json.dump(
-        #         {
-        #             'path': p.data.numpy().tolist(), 
-        #         },
-        #         f, indent=1)
-        #     print('Plan recorded in {}'.format(f.name))
-        #     pathname = f.name
+def exp_escape_from_high_risk(robot_name, robot, env_name, dist_est):
+    options_escape = {
+        'N_WAYPOINTS': 80,
+        'safety_margin': -1.5,
+        'lr': 5e-2
+    }
+    # start_cfg = torch.FloatTensor([65, 14, 122, -82, 0, 94, 44])/180*np.pi
+    # start_cfg = torch.FloatTensor([-84, -21, 8, 62, 91, 79, -132, 41, -42, 35, 126, -120, 108, 158])/180*np.pi # baxter, self collision 1
+    start_cfg = torch.FloatTensor([-12, 28, -95, 85, 147, 1, -27, 22, -21, 48, 97, -51, -42, -14])/180*np.pi # baxter, self collision 2
+    p = escape(robot, dist_est, start_cfg, options_escape)
+    pathname = 'results/path_3d_{}_{}_escape2.json'.format(robot_name, env_name)
+    with open(pathname, 'w') as f:
+        json.dump(
+            {
+                'path': p.data.numpy().tolist(), 
+            },
+            f, indent=1)
+        print('Plan recorded in {}'.format(f.name))
+        pathname = f.name
+    
+    return p, pathname
 
-        ## This is for loading previous trajectories
+def load_previous_path():
+    # pathname = 'results/path_3d_panda_bookshelvessmall.json'
+    # pathname = 'data/panda_bookshelvessmall_rrt.json'
+    # pathname = 'data/baxter_medium_rrt.json'
+    # pathname = 'results/path_3d_baxter_medium.json'
+    # pathname = 'results/3d_path_backup/path_3d_baxter_complex.json'
+    pathname = 'results/3d_path_backup/path_3d_baxter_medium.json'
+    if pathname is not None:
         with open(pathname, 'r') as f:
             p = torch.FloatTensor(json.load(f)['path'])
         # with open('data/medium_success_2.json', 'r') as f:
         #     p = torch.FloatTensor(json.load(f)['path'])
+        p = utils.dense_path(p, 0.2)
+    
+    return p
+
+def main():
+    robot_name = 'baxter' # [baxter, panda]
+    group_name = 'left_arm'
+    env_name = 'medium' # ['2objontable', 'medium', 'bookshelvessmall', 'catontable', 'complex', 'table', 'self']
+    filename = None # 'data/3d_baxter_self_both_arms.pt'
+
+    # Load dataset
+    # cfgs, labels, obstacles, robot, train_num, fkine = load_dataset(robot_name, env_name, filename)
+
+    # Get DiffCo
+    # load_model=True
+    # checker = get_diffco_model(obstacles, fkine, cfgs[:train_num], labels[:train_num], 
+    #     load_model=load_model, robot_name=robot_name, env_name=env_name)
+    # dist_est, safety_margin = fit_dist_model(checker, fkine, test_cfgs=cfgs[train_num:])
+    # eval_model(dist_est, cfgs, labels, train_num=train_num, safety_margin=safety_margin)
+
+    # Setting start and target configurations using one of the predefined ones. 
+    # Note: modify the function before using it
+    # start_cfg, target_cfg = predefined_start_target_cfgs()
+    
+    
+    # This is for trajectory optimization with an initial guess
+    # p, pathname = exp_optimize_given_path(robot_name, robot, env_name, dist_est, safety_margin)
+
+    ## This is for escaping from high-risk region
+    # p, pathname = exp_escape_from_high_risk(robot_name, robot, env_name, dist_est)
+
+    ## This is for loading previous trajectories
+    p = load_previous_path()
+    
 
     try:
         raw_input = input
@@ -683,7 +748,7 @@ def main():
         # box_names, exp = animate_path(p, obstacles)
         # box_names, exp = single_shot(torch.cat([init_guess.detach(), utils.dense_path(p, 0.1)], dim=0), obstacles)
         # exp = single_shot(utils.dense_path(p, 0.1), obstacles)
-        exp = single_shot(p, obstacles)
+        exp = single_shot(p, obstacles=None, robot_name=robot_name, group_name=group_name)
 
     except rospy.ROSInterruptException:
         pass
