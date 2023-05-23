@@ -691,21 +691,24 @@ def load_previous_path():
     # pathname = 'results/path_3d_panda_bookshelvessmall.json'
     # pathname = 'data/panda_bookshelvessmall_rrt.json'
     # pathname = 'data/baxter_medium_rrt.json'
+    # pathname = 'data/baxter_medium_rrt_looksbad.json'
     # pathname = 'results/path_3d_baxter_medium.json'
     # pathname = 'results/3d_path_backup/path_3d_baxter_complex.json'
-    pathname = 'results/3d_path_backup/path_3d_baxter_medium.json'
+    # pathname = 'results/3d_path_backup/path_3d_baxter_medium.json'
+    # pathname = 'results/3d_path_backup/path_3d_baxter_catontable_escape.json'
+    pathname = 'results/3d_path_backup/path_3d_baxter_self_escape2.json'
     if pathname is not None:
         with open(pathname, 'r') as f:
             p = torch.FloatTensor(json.load(f)['path'])
         # with open('data/medium_success_2.json', 'r') as f:
         #     p = torch.FloatTensor(json.load(f)['path'])
-        p = utils.dense_path(p, 0.2)
+        p = utils.dense_path(p, 0.05)
     
     return p
 
 def main():
     robot_name = 'baxter' # [baxter, panda]
-    group_name = 'left_arm'
+    group_name = 'both_arms'
     env_name = 'medium' # ['2objontable', 'medium', 'bookshelvessmall', 'catontable', 'complex', 'table', 'self']
     filename = None # 'data/3d_baxter_self_both_arms.pt'
 

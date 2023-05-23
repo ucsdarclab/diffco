@@ -354,13 +354,13 @@ Visualization Manager:
             Show Trail: false
             Value: true
         Loop Animation: false
-        Robot Alpha: 0.800000011920929
+        Robot Alpha: 1
         Robot Color: 150; 50; 150
         Show Robot Collision: true
         Show Robot Visual: false
         Show Trail: true
-        State Display Time: 0.05 s
-        Trail Step Size: 3
+        State Display Time: 0.1s
+        Trail Step Size: 12
         Trajectory Topic: /move_group/display_planned_path
       Planning Metrics:
         Payload: 1
@@ -716,7 +716,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/XYOrbit
-      Distance: 2.7225112915039062
+      Distance: 1.6326773166656494
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -724,17 +724,17 @@ Visualization Manager:
         Value: false
       Field of View: 0.7853981852531433
       Focal Point:
-        X: 1.0216665267944336
-        Y: 0.46861982345581055
-        Z: 3.30410803144332e-05
+        X: 0.8783013820648193
+        Y: -0.014406077563762665
+        Z: 3.3398708183085546e-05
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.6597968935966492
+      Pitch: 0.39979755878448486
       Target Frame: base
-      Yaw: 0.689354658126831
+      Yaw: 6.2825446128845215
     Saved:
       - Class: rviz/XYOrbit
         Distance: 2.7225112915039062
@@ -756,6 +756,26 @@ Visualization Manager:
         Pitch: 0.6597968935966492
         Target Frame: base
         Yaw: 0.689354658126831
+      - Class: rviz/XYOrbit
+        Distance: 2.3958098888397217
+        Enable Stereo Rendering:
+          Stereo Eye Separation: 0.05999999865889549
+          Stereo Focal Distance: 1
+          Swap Stereo Eyes: false
+          Value: false
+        Field of View: 0.7853981852531433
+        Focal Point:
+          X: 1.2490307092666626
+          Y: -0.42719799280166626
+          Z: 3.351791747263633e-05
+        Focal Shape Fixed Size: true
+        Focal Shape Size: 0.05000000074505806
+        Invert Z Axis: false
+        Name: baxter_cat
+        Near Clip Distance: 0.009999999776482582
+        Pitch: 0.48479750752449036
+        Target Frame: base
+        Yaw: 5.627536773681641
 Window Geometry:
   Displays:
     collapsed: false
