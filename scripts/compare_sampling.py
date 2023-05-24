@@ -115,24 +115,17 @@ def single_plot(robot, p, fig, link_plot, joint_plot, eff_plot, cfg_path_plots=N
     from matplotlib.lines import Line2D
     points_traj = robot.fkine(p)
     points_traj = torch.cat([torch.zeros(len(p), 1, 2), points_traj], dim=1)
-    traj_alpha = 0.3
-    ends_alpha = 0.5
+    traj_alpha = 0.1
+    eff_alpha = 0.4
     
     lw = link_plot.get_lw()
     link_traj = [ax.plot(points[:, 0], points[:, 1], color='gray', alpha=traj_alpha, lw=lw, solid_capstyle='round')[0] for points in points_traj]
     # joint_traj = [ax.plot(points[:-1, 0], points[:-1, 1], 'o', color='tab:red', alpha=traj_alpha, markersize=lw)[0] for points in points_traj]
-    eff_traj = [ax.plot(points[-1:, 0], points[-1:, 1], 'o', color='black', alpha=traj_alpha, markersize=lw)[0] for points in points_traj]
+    eff_traj = [ax.plot(points[-1:, 0], points[-1:, 1], 'o', color='black', alpha=eff_alpha, markersize=lw)[0] for points in points_traj]
 
-    for i in [0, -1]:
-        link_traj[i].set_alpha(ends_alpha)
-        # link_traj[i].set_path_effects([path_effects.SimpleLineShadow(), path_effects.Normal()])
-        # joint_traj[i].set_alpha(ends_alpha)
-        eff_traj[i].set_alpha(ends_alpha)
-    # link_traj[0].set_color('green')
-    # link_traj[-1].set_color('orange')
 
 # Commented out lines include convenient code for debugging purposes
-def main(datapath, total_num_cfgs, key=None):
+def main(datapath, total_num_cfgs, key=None, exp_unique_key=None):
     dataset = torch.load(datapath)
     cfgs = dataset['data']
     labels = dataset['label']
@@ -188,6 +181,7 @@ def main(datapath, total_num_cfgs, key=None):
     cnt_sampled = 0
     cnt_diffco_check = 0
     cnt_fcl_check = 0
+    sampled_cfgs = []
     valid_cfgs = []
     optim_sampler = OptimSampler(robot, dist_est, optim_esc_options)
     t_sampling = time()
@@ -199,6 +193,7 @@ def main(datapath, total_num_cfgs, key=None):
                 cfg, tmp_diffco_check = optim_sampler.optim_escape(cfg)
                 cfg = cfg[0]
                 cnt_diffco_check += tmp_diffco_check
+            sampled_cfgs.append(cfg)
             if fcl_checker(cfg, distance=False)[0] < 0:
                 valid_cfgs.append(cfg)
                 cnt_valid += 1
@@ -208,10 +203,13 @@ def main(datapath, total_num_cfgs, key=None):
     print(f'{key} took {t_sampling} seconds to reach {total_num_cfgs} valid configurations')
     print(f'Total sampled {cnt_sampled}, fcl check {cnt_fcl_check} times, diffco check {cnt_diffco_check} times')
 
+    exp_unique_key = '' if exp_unique_key is None else f'_{exp_unique_key}'
     path_dir = 'results/escape'
     os.makedirs(path_dir, exist_ok=True)
-    valid_cfgs = torch.stack(valid_cfgs[:100])
-    pathname = os.path.join(path_dir, f'esc_{env_name}.json')
+    valid_cfgs = torch.stack(valid_cfgs[:1000])
+    sampled_cfgs = torch.stack(sampled_cfgs[:1000])
+    
+    pathname = os.path.join(path_dir, f'esc_{env_name}{exp_unique_key}.json')
     with open(pathname, 'w') as f:
         json.dump({
             'time': t_sampling,
@@ -219,32 +217,25 @@ def main(datapath, total_num_cfgs, key=None):
             'cnt_sampled': cnt_sampled,
             'cnt_fcl_check': cnt_fcl_check,
             'cnt_diffco_check': cnt_diffco_check,
-            'cfgs': valid_cfgs.data.numpy().tolist(), 
+            'valid_cfgs': valid_cfgs.data.numpy().tolist(), 
+            'sampled_cfgs': sampled_cfgs.data.numpy().tolist(),
             'options': {k: str(optim_esc_options[k]) for k in optim_esc_options}
         }, f, indent=1)
         print('Plan recorded in {}'.format(f.name))
 
     ## This is for loading previously computed trajectory
     with open(pathname, 'r') as f:
-        valid_cfg_rec = json.load(f)
+        rec = json.load(f)
 
     # (Recommended) This produces a single shot of the valid cfgs
-    single_plot(robot, torch.FloatTensor(valid_cfg_rec['cfgs']), fig, link_plot, joint_plot, eff_plot, cfg_path_plots=cfg_path_plots, ax=ax)
+    single_plot(robot, torch.FloatTensor(rec['sampled_cfgs']), fig, link_plot, joint_plot, eff_plot, cfg_path_plots=cfg_path_plots, ax=ax)
     plt.tight_layout()
-    fig_dir = 'figs/escape'
+    fig_dir = 'figs/compare_sampling'
     os.makedirs(fig_dir, exist_ok=True)
     # plt.show()
-    plt.savefig(os.path.join(fig_dir, '2d_{}dof_{}.png'.format(robot.dof, env_name)), dpi=500)
-    # plt.savefig(os.path.join(fig_dir, '_new_2d_{}dof_{}_equalmargin'.format(robot.dof, env_name)), dpi=500) #_equalmargin.png
-
-    # plt.savefig('figs/opening_contourline.png', dpi=500, bbox_inches='tight')
-    
-    
-
-
+    plt.savefig(os.path.join(fig_dir, f'2d_{robot.dof}dof_{env_name}{exp_unique_key}.png'), dpi=500)
 
 
 if __name__ == "__main__":
-    main('data/compare_escape/2d_7dof_300obs_binary_7d_narrow.pt', 1000, key='optim') #'equalmargin'
-    # main('data/compare_escape/2d_7dof_300obs_binary_7d_narrow.pt', 1000, key='resampling') #'equalmargin'
-    # main('2class_1', 3, key='equalmargin')
+    main('data/compare_sampling/2d_7dof_300obs_binary_7d_narrow.pt', total_num_cfgs=3, key='optim', exp_unique_key='001')
+    main('data/compare_sampling/2d_7dof_300obs_binary_7d_narrow.pt', total_num_cfgs=3, key='resampling', exp_unique_key='001')
