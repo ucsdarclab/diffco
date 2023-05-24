@@ -23,7 +23,7 @@ class OptimSampler():
         opt = self.optimizer([p], **self.opt_args)
 
         for step in range(self.N_WAYPOINTS):
-            collision_score = self.dist_est(p)-self.safety_margin
+            collision_score = torch.sum(self.dist_est(p)-self.safety_margin)
             if collision_score <= 0:
                 break
             if self.record_freq and step % self.record_freq == 0:
