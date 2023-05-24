@@ -51,6 +51,9 @@ def rot_2d(phi):
 def wrap2pi(theta):
     return (np.pi + theta) % (np.pi*2)-np.pi
 
+def se2_wrap2pi(x):
+    return torch.cat([x[..., :2], wrap2pi(x[..., 2:3])], dim=-1)
+
 # Generate a sequence of angles between q1 and q2,
 # acts like np.linspace but considered the wrapping-around problem
 # q1 and q2 can both be vectors of the same dimension
