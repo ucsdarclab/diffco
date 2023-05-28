@@ -7,16 +7,9 @@ from diffco import kernel
 from matplotlib import pyplot as plt
 import numpy as np
 import torch
-from diffco.model import RevolutePlanarRobot
-import fcl
-from scipy import ndimage
-from matplotlib import animation
-from matplotlib.patches import Rectangle, FancyBboxPatch, Circle
 import seaborn as sns
 sns.set()
-import matplotlib.patheffects as path_effects
 from diffco import utils, CollisionChecker
-from diffco.Obstacles import FCLObstacle
 from trajectory_optim import adam_traj_optimize
 from distest_error_vis import fit_checker, get_estimator, train_checker, train_test_split, unpack_dataset, test_checker, autogenerate_dataset
 from visualize_trajectory_2d import animation_demo, create_plots, single_plot
