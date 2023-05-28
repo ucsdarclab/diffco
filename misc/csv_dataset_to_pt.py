@@ -1,4 +1,4 @@
-from diffco.utils import load_dataset
+from diffco.routines import load_dataset
 import torch
 import argparse
 

@@ -12,7 +12,7 @@ from matplotlib.patches import Circle, Rectangle
 from numpy.random import rand, randint
 from tqdm import tqdm
 
-from distest_error_vis import generate_unified_grid
+from diffco.routines import generate_unified_grid
 
 sns.set()
 
