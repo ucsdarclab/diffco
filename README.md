@@ -1,7 +1,9 @@
 # DiffCo: Auto-Differentiable Proxy Collision Checking
 
 ## Updates
-<span style="color:red"> [*NEW*]</span> 05/30/2023 First notebook tutorial available! Check out `notebook_tutorials/trajectory_optimization_tutorial.ipynb` (A few upgrades to optimization setup as well.)
+<!-- <span style="color:red"> [*NEW*]</span>  -->
+🟥 *[05/30/2023]* **First notebook tutorial** available! Check out `notebook_tutorials/trajectory_optimization_tutorial.ipynb`
+(A few upgrades to optimization setup as well.)
 
 This is the codebase for our paper **DiffCo: Auto-Differentiable Proxy Collision Detection with Multi-class Labels for Safety-Aware Trajectory Optimization**, Yuheng Zhi, Nikhil Das, Michael Yip. [[arxiv]](https://arxiv.org/abs/2102.07413)[[IEEE T-Ro]](https://ieeexplore.ieee.org/document/9747928)
 
