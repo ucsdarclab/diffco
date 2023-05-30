@@ -5,6 +5,10 @@
 
 This is the codebase for our paper **DiffCo: Auto-Differentiable Proxy Collision Detection with Multi-class Labels for Safety-Aware Trajectory Optimization**, Yuheng Zhi, Nikhil Das, Michael Yip. [[arxiv]](https://arxiv.org/abs/2102.07413)[[IEEE T-Ro]](https://ieeexplore.ieee.org/document/9747928)
 
+RRT-Connect             |  Optimized
+:-------------------------:|:-------------------------:
+![image](assets/readme-img/rrtconnect.gif) | ![image](assets/readme-img/rrtconnect+optimize.gif)
+
 ## Installation
 It is recommended to use [Conda](https://docs.conda.io/projects/conda/en/latest/user-guide/getting-started.html) for virtual environment management.
 ```
