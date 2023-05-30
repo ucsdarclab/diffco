@@ -172,7 +172,7 @@ def train_checker(
         fkine (Callable | None): The forward kinematics method (could be None).
         obstacles (list): The obstacles.
         trained_dump_filename (str): The filename for the trained checker dump.
-        lmbda (int): Argument passed to RQKernel when training a new collision
+        lmbda (float): Argument passed to RQKernel when training a new collision
             checker. Defaults to 10.
     
     Returns:
@@ -181,10 +181,11 @@ def train_checker(
     kernel_func = kernel.FKKernel(fkine, kernel.RQKernel(lmbda)) if fkine is not None else kernel.RQKernel(lmbda)
     checker = checker_type(obstacles, kernel_func=kernel_func, beta=1.0) 
     checker.train(train_data, train_labels, max_iteration=len(train_data), distance=train_dists)
-    os.makedirs('results', exist_ok=True)
-    with open(os.path.join('results', f'{trained_checker_dump}.p'), 'wb') as f:
-        pickle.dump(checker, f)
-        print('checker saved: {}'.format(f.name))
+    if trained_checker_dump is not None:
+        os.makedirs('results', exist_ok=True)
+        with open(os.path.join('results', f'{trained_checker_dump}.p'), 'wb') as f:
+            pickle.dump(checker, f)
+            print('checker saved: {}'.format(f.name))
     return checker
 
 def fit_checker(
@@ -232,10 +233,10 @@ def get_estimator(checker: CollisionChecker, scoring_method: str = 'rbf_score') 
     Returns:
         Callable: The corresponding scoring method.
     """
-    if scoring_method == 'rbf_score':
-        return checker.rbf_score
     if scoring_method == 'poly_score':
         return checker.poly_score
+    if scoring_method == 'full_poly_score':
+        return checker.full_poly_score
     if scoring_method == 'score':
         return checker.score
     raise NotImplementedError(scoring_method)
@@ -245,7 +246,7 @@ def test_checker(
         dist_est: Callable,
         test_data: torch.Tensor,
         test_labels: torch.Tensor,
-        safety_margin: int = 0) -> None:
+        safety_margin: float = 0) -> None:
     """Run a trained collision checker on the test set and print results.
 
     Args:
@@ -262,7 +263,7 @@ def test_checker(
     test_acc = torch.sum(test_preds == test_labels, dtype=torch.float32)/len(test_preds.view(-1))
     test_tpr = torch.sum(test_preds[test_labels ==1] == 1, dtype=torch.float32) / len(test_preds[test_labels ==1])
     test_tnr = torch.sum(test_preds[test_labels ==-1] == -1, dtype=torch.float32) / len(test_preds[test_labels==-1])
-    print('Test acc: {}, TPR {}, TNR {}'.format(test_acc, test_tpr, test_tnr))
+    print('Test acc: {:.4f}, TPR {:.4f}, TNR {:.4f}'.format(test_acc, test_tpr, test_tnr))
     print(len(checker.gains), 'Support Points')
 
 def open3d_save_image(geoms, path):

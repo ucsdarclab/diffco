@@ -418,7 +418,7 @@ class PandaFK(Model):
             d=    [ L[0],     0, L[1],    0,  L[3],    0, L[5]],
             theta=[    0,     0,    0,    0,     0,    0,    0]
         )
-        print(self.dhparams.a, self.dhparams.alpha, self.dhparams.d)
+        # print(self.dhparams.a, self.dhparams.alpha, self.dhparams.d)
         self.c_alpha = self.dhparams.alpha.cos()
         self.s_alpha = self.dhparams.alpha.sin()
         self.dof = 7

@@ -411,7 +411,7 @@ if __name__ == "__main__":
     parser.add_argument('--fitting-epsilon', type=float, default=0.01)
     parser.add_argument('-k', '--kernel-type', choices=['polyharmonic', 'multiquadratic'], default='polyharmonic')
     parser.add_argument('--fit-full-poly', action='store_true', default=False)
-    parser.add_argument('--scoring-method', choices=['rbf_score', 'poly_score', 'score'], default='rbf_score')
+    parser.add_argument('--scoring-method', choices=['poly_score', 'full_poly_score', 'score'], default='poly_score')
     parser.add_argument('--safety_margin', type=int, default=0)
     parser.add_argument('--random-seed', type=int, default=2021)
     args = parser.parse_args()

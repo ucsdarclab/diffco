@@ -175,10 +175,10 @@ class DiffCo(CollisionChecker):
     def device(self):
         return self.support_points.device
     
-    def rbf_score(self, point):
+    def poly_score(self, point):
         if point.ndim == 1:
             point = point[np.newaxis, :]
-        point = point.to(self.rbf_nodes.device)
+        point = point.to(device=self.rbf_nodes.device, dtype=self.rbf_nodes.dtype)
         if self.fkine is not None:
             point = self.fkine(point).reshape([len(point), -1])
             supports = self.support_fkine
@@ -211,7 +211,7 @@ class DiffCo(CollisionChecker):
             torch.cat([y, torch.zeros(X.shape[1]+1)], dim=0).reshape(-1, 1),
             L).solution.reshape(-1)
     
-    def poly_score(self, point):
+    def full_poly_score(self, point):
         if point.ndim == 1:
             point = point[np.newaxis, :]
         if self.fkine is not None:
