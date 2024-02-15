@@ -56,7 +56,8 @@ class MotionPlanner(object):
         self.pdef = ob.ProblemDefinition(self.si)
         self.objetive = MyObjective(self.si, motion_cost_function) #ob.PathLengthOptimizationObjective(self.si))
         self.pdef.setOptimizationObjective(self.objetive)
-        self.planner = og.RRTstar(self.si)
+        self.planner = og.RRTConnect(self.si)
+        print(f'planner: {self.planner.getName()}')
         self.planner.setProblemDefinition(self.pdef)
         self.planner.setup()
         self.longest_valid_segment_length = self.space.getLongestValidSegmentLength()
@@ -94,7 +95,9 @@ class MotionPlanner(object):
             rec['success'] = True
             # rec['cost'] = path.cost(self.objetive).value()
             path = path.getStates()
-            path = torch.stack([to_tensor(s, self.robot.dof) for s in path], dim=0)
+            path = torch.stack([to_tensor(s, self.robot.dof) for s in path], dim=0).to(dtype=start_cfg.dtype)
+            assert torch.isclose(path[0], start_cfg).all() and torch.isclose(path[-1], target_cfg).all(), \
+                f'path[0] = {path[0]}, start_cfg = {start_cfg}, path[-1] = {path[-1]}, target_cfg = {target_cfg}'
             path = dense_path(path, max_step=self.longest_valid_segment_length)
             rec['cost'] = sum([self.objetive.func(path[i], path[i+1]) for i in range(len(path)-1)])
             path = path.numpy().tolist()

@@ -84,48 +84,6 @@ def make_continue(q, max_gap=np.pi):
     offset = -torch.cumsum(sudden_change, dim=0) * np.pi*2
     return q + offset
 
-def open3d_save_image(geoms, path):
-    import open3d as o3d
-    vis = o3d.visualization.Visualizer()
-    vis.create_window(visible=False)
-    for geom in geoms:
-        vis.add_geometry(geom)
-        vis.update_geometry(geom)
-        vis.poll_events()
-    vis.update_renderer()
-    vis.capture_screen_image(path)
-    vis.destroy_window()
-
-def view_se3_path(robot, env_mesh, path):
-    import trimesh
-    rmeshes = []
-    for i in range(len(path)):# torch.nonzero(fcl_preds.view(-1) == 1):
-        r = euler2mat(path[i, 3:])[0].numpy()
-        t = path[i, :3]
-        tf = np.eye(4)
-        tf[:3, :3] = r
-        tf[:3, 3] = t
-        r_mesh = robot.mesh.copy()
-        r_mesh.apply_transform(tf)
-        r_mesh.visual.vertex_colors = trimesh.visual.interpolate(r_mesh.vertices[:, 2], color_map='viridis')
-        rmeshes.append(r_mesh)
-    rmeshes[0].visual.vertex_colors = np.ones((len(rmeshes[0].vertices), 3)) * [0, 1, 0]
-    rmeshes[-1].visual.vertex_colors = np.ones((len(rmeshes[-1].vertices), 3)) * [1, 1, 0]
-    sum(rmeshes, env_mesh).show()
-
-def save_ompl_path(filename, path):
-    # input x, y, z, roll, pitch, yaw ('xyz' extrinsic convention euler angles)
-    # output x,y,z,q1,q2,q3,w (scalar-last quaternions)
-    from scipy.spatial.transform import Rotation
-    # path = path.data.numpy()
-    p_numpy = np.zeros((len(path), 7))
-    p_numpy[:, :3] = path[:, :3]
-    p_numpy[:, 3:] = Rotation.from_euler('xyz', path[:, 3:]).as_quat()
-    # p_numpy[:, 3:] = Rotation.from_matrix(euler2mat(path[:, 3:]).numpy()).as_quat()
-    with open(filename, 'w') as f:
-        f.writelines([' '.join(map(str, cfg))+'\n' for cfg in p_numpy.tolist()])
-        print('OMPL path saved in {}'.format(f.name))
-
 def dense_path(q, max_step=2.0):
     denseq = []
     for i in range(len(q)-1):
@@ -138,32 +96,6 @@ def dense_path(q, max_step=2.0):
     denseq = torch.cat(denseq)
     assert torch.all(denseq[0] == q[0]) and torch.all(denseq[-1] == q[-1])
     return denseq
-
-def load_dataset(filename: str, robot_name='2d', group=None, num_class=1):
-    if filename.endswith('.pt'):
-        return torch.load(filename)
-    elif filename.endswith('.csv'):
-        dataset = {}
-        all_data = torch.from_numpy(np.loadtxt(filename, delimiter=',', ndmin=2, dtype=np.float32))
-        assert all_data.dtype in [torch.float32, torch.double]
-        dataset['data'] = all_data[:, :-2*num_class]
-        dataset['label'] = all_data[:, -2*num_class:-num_class]
-        dataset['dist'] = all_data[:, -num_class:]
-        dataset['obs'] = None
-        if robot_name == 'panda':
-            from .model import PandaFK
-            dataset['robot'] = PandaFK
-        elif robot_name == 'baxter' and group == 'left_arm':
-            from .model import BaxterLeftArmFK
-            dataset['robot'] = BaxterLeftArmFK
-        elif robot_name == 'baxter' and group == 'both_arms':
-            from .model import BaxterDualArmFK
-            dataset['robot'] = BaxterDualArmFK
-        else:
-            raise NotImplementedError()
-    return dataset
-        
-        
         
 
 

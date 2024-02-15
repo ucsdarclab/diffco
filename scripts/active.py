@@ -17,7 +17,7 @@ from matplotlib import animation
 from matplotlib.patches import Rectangle, FancyBboxPatch, Circle
 import seaborn as sns
 
-from scripts.distest_error_vis import autogenerate_dataset, unpack_dataset
+from diffco.routines import autogenerate_2d_dataset, unpack_dataset
 sns.set()
 import matplotlib.patheffects as path_effects
 from diffco import utils
@@ -549,7 +549,7 @@ def main(
             useful for debugging. Defaults to 1918.
     """
     if dataset_filepath is None:
-        dataset_filepath = autogenerate_dataset(2, 1, 'binary', '1rect_active', link_length=3.5, random_seed=random_seed)
+        dataset_filepath = autogenerate_2d_dataset(2, 1, 'binary', '1rect_active', link_length=3.5, random_seed=random_seed)
     description = os.path.splitext(os.path.basename(dataset_filepath))[0]  # Remove the .pt extension
     robot, cfgs, labels, dists, obstacles = unpack_dataset(dataset_filepath)
     cfgs = cfgs.double()
