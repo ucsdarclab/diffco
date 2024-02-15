@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 from diffco.routines import generate_unified_grid
 
-sns.set()
+sns.set_theme()
 
 def create_plots(robot, obstacles, cfg=None):
     from matplotlib.cm import get_cmap

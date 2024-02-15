@@ -8,7 +8,7 @@ from matplotlib import pyplot as plt
 import numpy as np
 import torch
 import seaborn as sns
-sns.set()
+sns.set_theme()
 from diffco import utils, CollisionChecker
 from trajectory_optim import adam_traj_optimize
 from diffco.routines import fit_checker, get_estimator, train_checker, train_test_split, unpack_dataset, test_checker, autogenerate_2d_dataset
