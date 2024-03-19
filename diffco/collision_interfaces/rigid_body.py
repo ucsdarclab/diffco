@@ -33,11 +33,12 @@ class RigidBody:
         self._children = []
 
         self._device = torch.device(device)
-        self.joint_id = rigid_body_params["joint_id"]
+        self.link_idx = rigid_body_params["link_idx"]
         self.name = rigid_body_params["link_name"]
+        self.joint_name = rigid_body_params["joint_name"]
 
-        self.trans = lambda: rigid_body_params["trans"].reshape(1, 3)
-        self.rot_angles = lambda: rigid_body_params["rot_angles"].reshape(1, 3)
+        self.join_trans = lambda: rigid_body_params["joint_trans"].reshape(1, 3)
+        self.joint_rot_angles = lambda: rigid_body_params["joint_rot_angles"].reshape(1, 3)
 
         # local joint axis (w.r.t. joint coordinate frame):
         self.joint_axis = rigid_body_params["joint_axis"]
@@ -45,11 +46,26 @@ class RigidBody:
         self.joint_limits = rigid_body_params["joint_limits"]
 
         self.joint_pose = CoordinateTransform(device=self._device)
-        self.joint_pose.set_translation(torch.reshape(self.trans(), (1, 3)))
+        self.joint_pose.set_translation(torch.reshape(self.join_trans(), (1, 3)))
 
         self.update_joint_state(
             torch.zeros([1, 1], device=self._device),
         )
+
+        self.collision_origins = rigid_body_params.get("collision_origins", None)
+        if self.collision_origins:
+            self.collision_origins = [CoordinateTransform(
+                rot=pose[:3, :3].reshape(1, 3, 3),
+                trans=pose[:3, 3].reshape(1, 3),
+                device=self._device,
+            ) for pose in self.collision_origins]
+        self.visual_origins = rigid_body_params.get("visual_origins", None)
+        if self.visual_origins:
+            self.visual_origins = [CoordinateTransform(
+                rot=pose[:3, :3].reshape(1, 3, 3),
+                trans=pose[:3, 3].reshape(1, 3),
+                device=self._device,
+            ) for pose in self.visual_origins]
 
         self.pose = CoordinateTransform(device=self._device)
 
@@ -61,7 +77,7 @@ class RigidBody:
         self._children.append(link)
 
     # Recursive algorithms
-    def forward_kinematics(self, q_dict):
+    def forward_kinematics(self, q_dict, return_collision=False):
         """Recursive forward kinematics
         Computes transformations from self to all descendants.
 
@@ -72,7 +88,7 @@ class RigidBody:
             q = q_dict[self.name]
             batch_size = q.shape[0]
 
-            rot_angles_vals = self.rot_angles()
+            rot_angles_vals = self.joint_rot_angles()
             roll = rot_angles_vals[0, 0]
             pitch = rot_angles_vals[0, 1]
             yaw = rot_angles_vals[0, 2]
@@ -87,7 +103,7 @@ class RigidBody:
 
             joint_pose = CoordinateTransform(
                 rot=fixed_rotation.repeat(batch_size, 1, 1) @ rot,
-                trans=torch.reshape(self.trans(), (1, 3)).repeat(batch_size, 1),
+                trans=torch.reshape(self.join_trans(), (1, 3)).repeat(batch_size, 1),
                 device=self._device,
             )
 
@@ -95,16 +111,27 @@ class RigidBody:
             joint_pose = self.joint_pose
 
         # Compute forward kinematics of children
-        pose_dict = {self.name: self.pose}
+        if return_collision:
+            pose_dict = {self.name: [self.pose.multiply_transform(origin) for origin in self.collision_origins]}
+        else:
+            pose_dict = {self.name: [self.pose]}
         for child in self._children:
-            pose_dict.update(child.forward_kinematics(q_dict))
+            pose_dict.update(child.forward_kinematics(q_dict, return_collision))
 
         # Apply joint pose
         # TODO: add center of mass to pose if getting body transforms (vs link transforms)
         return {
-            body_name: joint_pose.multiply_transform(pose_dict[body_name])
+            body_name: [joint_pose.multiply_transform(p) for p in pose_dict[body_name]]
             for body_name in pose_dict
         }
+
+    def body_transforms(self, q_dict):
+        """Compute body transforms
+        Computes transformations from self to all descendants.
+
+        Returns: Dict[link_name, transform_from_self_to_link]
+        """
+        # Compute 
 
     # Get/set
     def update_joint_state(self, q):
@@ -115,7 +142,7 @@ class RigidBody:
         #     torch.zeros_like(joint_ang_vel), joint_ang_vel
         # )
 
-        rot_angles_vals = self.rot_angles()
+        rot_angles_vals = self.joint_rot_angles()
         roll = rot_angles_vals[0, 0]
         pitch = rot_angles_vals[0, 1]
         yaw = rot_angles_vals[0, 2]
@@ -124,7 +151,7 @@ class RigidBody:
 
         # when we update the joint angle, we also need to update the transformation
         self.joint_pose.set_translation(
-            torch.reshape(self.trans(), (1, 3)).repeat(batch_size, 1)
+            torch.reshape(self.join_trans(), (1, 3)).repeat(batch_size, 1)
         )
         if torch.abs(self.joint_axis[0, 0]) == 1:
             rot = x_rot(torch.sign(self.joint_axis[0, 0]) * q)
@@ -146,7 +173,7 @@ class RigidBody:
             "children": [child.name for child in self._children],
             "parent": self._parent.name if self._parent else "None",
             "_device": self._device,
-            "joint_id": self.joint_id,
+            "joint_idx": self.link_idx,
             "joint_axis": self.joint_axis,
             "joint_limits": self.joint_limits,
             "joint_pose": self.joint_pose,
