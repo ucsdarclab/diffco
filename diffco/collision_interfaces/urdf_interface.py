@@ -10,11 +10,15 @@ TODO
 from typing import List, Tuple, Dict, Optional
 from dataclasses import dataclass
 import os
+from collections import defaultdict
 
 import torch
 
 from yourdfpy import URDF
 from trimesh import transformations as tf
+import trimesh
+import fcl
+import numpy as np
 
 import robot_data
 
@@ -85,6 +89,32 @@ def tensor_check(function):
     return wrapper
 
 
+class URDFRobotCollisionManager(trimesh.collision.CollisionManager):
+    def __init__(self, urdf_robot: "URDFRobot"):
+        super().__init__()
+        self.urdf_robot = urdf_robot
+        self.link_collision_objects = defaultdict(list)
+
+        c_scene = self.urdf_robot.robot.collision_scene
+        for geometry_node_name in c_scene.graph.nodes_geometry:
+            T, geometry = c_scene.graph[geometry_node_name]
+            mesh = c_scene.geometry[geometry]
+            cobj = self.add_object(name=geometry_node_name, mesh=mesh, transform=T)
+            parent_link_name = c_scene.graph.transforms.parents[geometry_node_name]
+            self.link_collision_objects[parent_link_name].append(geometry_node_name)
+
+    def _get_fcl_obj(self, mesh):
+        if isinstance(mesh, trimesh.primitives.Box):
+            return fcl.Box(*mesh.extents.astype(np.float32))
+        elif isinstance(mesh, trimesh.primitives.Sphere):
+            return fcl.Sphere(np.float32(mesh.primitive.radius))
+        elif isinstance(mesh, trimesh.primitives.Cylinder):
+            return fcl.Cylinder(np.float32(mesh.primitive.radius), np.float32(mesh.primitive.height))
+        elif isinstance(mesh, trimesh.primitives.Capsule):
+            return fcl.Capsule(np.float32(mesh.primitive.radius), np.float32(mesh.primitive.height))
+        return super()._get_fcl_obj(mesh)
+
+
 class URDFRobot:
     def __init__(self, urdf_path, name='', device="cpu"):
         self.robot = URDF.load(
@@ -92,7 +122,8 @@ class URDFRobot:
             build_scene_graph=True,
             build_collision_scene_graph=True,
             load_meshes=False,
-            load_collision_meshes=True)
+            load_collision_meshes=True,
+            force_collision_mesh=False)
         self.name = name
         self._device = torch.device(device)
 
@@ -105,40 +136,79 @@ class URDFRobot:
         # joint is at the beginning of a link
         self._name_to_idx_map = dict()
 
-        for (i, link) in enumerate(self.robot.link_map.values()):
+        for link_idx, link in enumerate(self.robot.link_map.values()):
             # Initialize body object
-            rigid_body_params = self.get_body_parameters_from_urdf(i, link)
+            rigid_body_params = self.get_body_parameters_from_urdf(link_idx, link)
             body = RigidBody(
                 rigid_body_params=rigid_body_params, device=self._device
             )
 
             # Joint properties
-            body.joint_idx = None
+            body.dof_idx = None
             if rigid_body_params["joint_type"] != "fixed":
-                body.joint_idx = self._n_dofs
+                body.dof_idx = self._n_dofs
                 self._n_dofs += 1
-                self._controlled_joints.append(i)
+                self._controlled_joints.append(link_idx)
 
             # Add to data structures
             self._bodies.append(body)
-            self._name_to_idx_map[body.name] = i
+            self._name_to_idx_map[body.name] = link_idx
 
         # Once all bodies are loaded, connect each body to its parent
-        for body in self._bodies[1:]:
-            parent_body_name = self.get_name_of_parent_body(body.name)
+        for body in self._bodies:
+            if body.joint_name == 'base_joint':
+                continue
+            parent_body_name = self.robot.joint_map[body.joint_name].parent
             parent_body_idx = self._name_to_idx_map[parent_body_name]
             body.set_parent(self._bodies[parent_body_idx])
             self._bodies[parent_body_idx].add_child(body)
+        
+        # Collision manager maintains a fcl.DynamicAABBTreeCollisionManager,
+        # and a dictionary between link names and its list of fcl collision objects
+        # so that their transforms can be easily updated by forward kinematics function
+        self.collision_manager = URDFRobotCollisionManager(self)
+
     
+    def collision(self, q, other=None, show=False):
+        fk = self.compute_forward_kinematics_all_links(q, return_collision=True)
+        batch_size = q.shape[0]
+        collision_labels = torch.zeros(batch_size, dtype=torch.bool, device=self._device)
+        for i in range(batch_size):
+            for link_name, batch_pieces_pose in fk.items():
+                for batch_piece_pose, cobj_name in zip(
+                    batch_pieces_pose, self.collision_manager.link_collision_objects[link_name]):
+                    batch_piece_trans, batch_piece_rot = batch_piece_pose
+                    if len(batch_piece_pose) == 0 or i >= len(batch_piece_rot):
+                        continue
+                    rot = batch_piece_rot[i].numpy()
+                    t = np.eye(4, dtype=rot.dtype)
+                    t[:3, :3] = rot
+                    t[:3, 3] = batch_piece_trans[i].numpy()
+                    self.collision_manager.set_transform(cobj_name, t)
+
+            if show:
+                self.robot.update_cfg(q[i].numpy())
+                self.robot._scene_collision.show()
+            if other is None:
+                collision_labels[i] = self.collision_manager.in_collision_internal()
+            else:
+                collision_labels[i] = self.collision_manager.in_collision_other(other.collision_manager) or \
+                    self.collision_manager.in_collision_internal()
+        
+        return collision_labels
+    
+
     @tensor_check
     def compute_forward_kinematics_all_links(
-        self, q: torch.Tensor
+        self, q: torch.Tensor,
+        return_collision: bool = False
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         r"""
 
         Args:
             q: joint angles [batch_size x n_dofs]
             link_name: name of link
+            return_collision: whether to return collision geometry transforms
 
         Returns: translation and rotation of the link frame
 
@@ -149,10 +219,10 @@ class URDFRobot:
             q_dict[self._bodies[body_idx].name] = q[:, i].unsqueeze(1)
 
         # Call forward kinematics on root node
-        pose_dict = self._bodies[0].forward_kinematics(q_dict)
+        pose_dict = self._bodies[0].forward_kinematics(q_dict, return_collision)
 
         return {
-            link: (pose_dict[link].translation(), pose_dict[link].rotation())
+            link: [(p.translation(), p.rotation()) for p in pose_dict[link]]
             for link in pose_dict.keys()
         }
 
@@ -167,31 +237,28 @@ class URDFRobot:
         joint = self.robot.joint_map[jid]
         return joint.parent
 
-    def get_body_parameters_from_urdf(self, i, link):
+    def get_body_parameters_from_urdf(self, link_idx, link):
         body_params = {}
-        body_params["joint_id"] = i
+        body_params["link_idx"] = link_idx
         body_params["link_name"] = link.name
 
-        if i == 0:
-            rot_angles = torch.zeros(3, device=self._device)
-            trans = torch.zeros(3, device=self._device)
+        # find joint whose "child" of this body according to urdf
+        joint_name = self.find_joint_of_body(link.name)
+        if joint_name is None:
+            joint_rot_angles = torch.zeros(3, device=self._device)
+            joint_trans = torch.zeros(3, device=self._device)
             joint_name = "base_joint"
             joint_type = "fixed"
             joint_limits = None
             joint_damping = None
             joint_axis = torch.zeros((1, 3), device=self._device)
         else:
-            link_name = link.name
-            joint_name = self.find_joint_of_body(link_name)
             joint = self.robot.joint_map[joint_name]
-            # joint_name = joint.name
-            # find joint whose "child" of this body according to urdf
-
-            rot_angles = torch.tensor(
+            joint_rot_angles = torch.tensor(
                 tf.euler_from_matrix(joint.origin[:3, :3], axes='sxyz'), 
                 dtype=torch.float32, device=self._device
             )
-            trans = torch.tensor(
+            joint_trans = torch.tensor(
                 joint.origin[:3, 3], dtype=torch.float32, device=self._device
             )
             joint_type = joint.type
@@ -206,8 +273,11 @@ class URDFRobot:
                     "velocity": joint.limit.velocity,
                 }
                 try:
+                    joint_damping = joint.dynamics.damping
+                    if isinstance(joint_damping, str):
+                        joint_damping = float(joint_damping)
                     joint_damping = torch.tensor(
-                        [joint.dynamics.damping],
+                        [joint_damping],
                         dtype=torch.float32,
                         device=self._device,
                     )
@@ -217,8 +287,8 @@ class URDFRobot:
                     joint.axis, dtype=torch.float32, device=self._device
                 ).reshape(1, 3)
 
-        body_params["rot_angles"] = rot_angles
-        body_params["trans"] = trans
+        body_params["joint_rot_angles"] = joint_rot_angles
+        body_params["joint_trans"] = joint_trans
         body_params["joint_name"] = joint_name
         body_params["joint_type"] = joint_type
         body_params["joint_limits"] = joint_limits
@@ -239,16 +309,6 @@ class URDFRobot:
                 .to(self._device)
             )
 
-            # inert_mat = torch.zeros((3, 3), device=self._device)
-            # inert_mat[0, 0] = link.inertial.inertia.ixx
-            # inert_mat[0, 1] = link.inertial.inertia.ixy
-            # inert_mat[0, 2] = link.inertial.inertia.ixz
-            # inert_mat[1, 0] = link.inertial.inertia.ixy
-            # inert_mat[1, 1] = link.inertial.inertia.iyy
-            # inert_mat[1, 2] = link.inertial.inertia.iyz
-            # inert_mat[2, 0] = link.inertial.inertia.ixz
-            # inert_mat[2, 1] = link.inertial.inertia.iyz
-            # inert_mat[2, 2] = link.inertial.inertia.izz
             inert_mat = torch.tensor(
                 link.inertial.inertia, 
                 dtype=torch.float32,
@@ -270,6 +330,40 @@ class URDFRobot:
                     link.name
                 )
             )
+        
+        if link.collisions is not None:
+            collision_origins = []
+            for collision in link.collisions:
+                if collision.origin is None:
+                    origin = torch.eye(
+                        4, 
+                        dtype=torch.float32,
+                        device=self._device)
+                else:
+                    origin = torch.tensor(
+                        collision.origin,
+                        dtype=torch.float32,
+                        device=self._device,
+                    ).reshape((4, 4))
+                collision_origins.append(origin)
+            body_params["collision_origins"] = collision_origins
+        
+        if link.visuals is not None:
+            visual_origins = []
+            for visual in link.visuals:
+                if visual.origin is None:
+                    origin = torch.eye(
+                        4, 
+                        dtype=torch.float32,
+                        device=self._device)
+                else:
+                    origin = torch.tensor(
+                        visual.origin,
+                        dtype=torch.float32,
+                        device=self._device,
+                    ).reshape((4, 4))
+                visual_origins.append(origin)
+            body_params["visual_origins"] = visual_origins
 
         return body_params
 
