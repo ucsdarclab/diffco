@@ -36,17 +36,19 @@ class RigidBody:
         self.link_idx = rigid_body_params["link_idx"]
         self.name = rigid_body_params["link_name"]
         self.joint_name = rigid_body_params["joint_name"]
+        self.joint_type = rigid_body_params["joint_type"]
 
-        self.join_trans = lambda: rigid_body_params["joint_trans"].reshape(1, 3)
+        self.joint_trans = lambda: rigid_body_params["joint_trans"].reshape(1, 3)
         self.joint_rot_angles = lambda: rigid_body_params["joint_rot_angles"].reshape(1, 3)
 
         # local joint axis (w.r.t. joint coordinate frame):
         self.joint_axis = rigid_body_params["joint_axis"]
 
         self.joint_limits = rigid_body_params["joint_limits"]
+        self.joint_mimic = rigid_body_params["joint_mimic"]
 
         self.joint_pose = CoordinateTransform(device=self._device)
-        self.joint_pose.set_translation(torch.reshape(self.join_trans(), (1, 3)))
+        self.joint_pose.set_translation(torch.reshape(self.joint_trans(), (1, 3)))
 
         self.update_joint_state(
             torch.zeros([1, 1], device=self._device),
@@ -86,6 +88,8 @@ class RigidBody:
         # Compute joint pose
         if self.name in q_dict:
             q = q_dict[self.name]
+            if self.joint_mimic is not None:
+                q = q * self.joint_mimic.multiplier + self.joint_mimic.offset
             batch_size = q.shape[0]
 
             rot_angles_vals = self.joint_rot_angles()
@@ -93,20 +97,31 @@ class RigidBody:
             pitch = rot_angles_vals[0, 1]
             yaw = rot_angles_vals[0, 2]
             fixed_rotation = (z_rot(yaw) @ y_rot(pitch)) @ x_rot(roll)
+            fixed_translation = self.joint_trans().reshape(1, 3)
 
-            if torch.abs(self.joint_axis[0, 0]) == 1:
-                rot = x_rot(torch.sign(self.joint_axis[0, 0]) * q)
-            elif torch.abs(self.joint_axis[0, 1]) == 1:
-                rot = y_rot(torch.sign(self.joint_axis[0, 1]) * q)
-            else:
-                rot = z_rot(torch.sign(self.joint_axis[0, 2]) * q)
-
-            joint_pose = CoordinateTransform(
-                rot=fixed_rotation.repeat(batch_size, 1, 1) @ rot,
-                trans=torch.reshape(self.join_trans(), (1, 3)).repeat(batch_size, 1),
-                device=self._device,
-            )
-
+            if self.joint_type == "revolute":
+                if torch.abs(self.joint_axis[0, 0]) == 1:
+                    rot = x_rot(torch.sign(self.joint_axis[0, 0]) * q)
+                elif torch.abs(self.joint_axis[0, 1]) == 1:
+                    rot = y_rot(torch.sign(self.joint_axis[0, 1]) * q)
+                else:
+                    rot = z_rot(torch.sign(self.joint_axis[0, 2]) * q)
+                joint_pose = CoordinateTransform(
+                    rot=fixed_rotation.repeat(batch_size, 1, 1) @ rot,
+                    trans=fixed_translation.repeat(batch_size, 1),
+                    device=self._device,
+                )
+            elif self.joint_type == "prismatic":
+                trans = self.joint_axis.reshape(1, 3, 1) * q.reshape(-1, 1, 1)
+                assert torch.any(self.joint_axis != 0)
+                rot = fixed_rotation.repeat(batch_size, 1, 1)
+                trans = fixed_translation.reshape(-1, 3, 1) + rot @ trans
+                trans = trans.reshape(-1, 3)
+                joint_pose = CoordinateTransform(
+                    rot=rot,
+                    trans=trans,
+                    device=self._device,
+                )
         else:
             joint_pose = self.joint_pose
 
@@ -151,7 +166,7 @@ class RigidBody:
 
         # when we update the joint angle, we also need to update the transformation
         self.joint_pose.set_translation(
-            torch.reshape(self.join_trans(), (1, 3)).repeat(batch_size, 1)
+            torch.reshape(self.joint_trans(), (1, 3)).repeat(batch_size, 1)
         )
         if torch.abs(self.joint_axis[0, 0]) == 1:
             rot = x_rot(torch.sign(self.joint_axis[0, 0]) * q)
