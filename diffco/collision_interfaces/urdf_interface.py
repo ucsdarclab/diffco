@@ -17,6 +17,9 @@ import torch
 from yourdfpy import URDF
 from trimesh import transformations as tf
 import trimesh
+from trimesh.scene.scene import append_scenes
+import trimesh.viewer
+from trimesh.viewer import windowed
 import fcl
 from fcl import defaultCollisionCallback
 import numpy as np
@@ -24,6 +27,9 @@ import numpy as np
 import robot_data
 
 from .rigid_body import RigidBody
+from .robot_interface_base import RobotInterfaceBase
+from .spatial_vector_algebra import CoordinateTransform
+from .env_interface import ShapeEnv
 
 robot_description_folder = robot_data.__path__[0]
 
@@ -96,11 +102,11 @@ class URDFRobotCollisionManager(trimesh.collision.CollisionManager):
         self.urdf_robot = urdf_robot
         
         # use self.geom_to_parent_link to check if the CollisionGeometry's of a link are allowed to collide with another link
-        self.link_collision_objects, self.geom_name_to_parent_link = self._scene_to_collision(self.urdf_robot.robot.collision_scene)
+        self.link_collision_objects, self.geom_name_to_parent_link = self._scene_to_collision(self.urdf_robot.urdf.collision_scene)
         
-        self._allowed_collisions = self._create_allowed_collision_matrix(cfgs=None) # disable collision between adjacent links first
+        self._allowed_internal_collisions = self._create_allowed_internal_collision_matrix(cfgs=None) # disable collision between adjacent links first
         if acm_cfgs is not None:
-            self._allowed_collisions = self._create_allowed_collision_matrix(cfgs=acm_cfgs)
+            self._allowed_internal_collisions = self._create_allowed_internal_collision_matrix(cfgs=acm_cfgs)
 
     def _scene_to_collision(self, c_scene):
         """
@@ -131,7 +137,7 @@ class URDFRobotCollisionManager(trimesh.collision.CollisionManager):
         return super()._get_fcl_obj(mesh)
 
 
-    def _create_allowed_collision_matrix(self, cfgs=None):
+    def _create_allowed_internal_collision_matrix(self, cfgs=None):
         """
         Create an allowed collision matrix for the robot
         """
@@ -228,16 +234,16 @@ class URDFRobotCollisionManager(trimesh.collision.CollisionManager):
 
         objs_in_collision = set()
         contact_data = []
-        if return_names or return_data:
+        if return_names or return_data or self._allowed_internal_collisions is not None:
             result = False # override result unless there are disallowed collisions
             for contact in cdata.result.contacts:
                 names = (self._extract_name(contact.o1), self._extract_name(contact.o2))
 
                 # filter out allowed collisions
-                if self._allowed_collisions is not None:
+                if self._allowed_internal_collisions is not None:
                     parent_link1 = self.geom_name_to_parent_link[names[0]]
                     parent_link2 = self.geom_name_to_parent_link[names[1]]
-                    if (parent_link1, parent_link2) in self._allowed_collisions or (parent_link2, parent_link1) in self._allowed_collisions:
+                    if (parent_link1, parent_link2) in self._allowed_internal_collisions or (parent_link2, parent_link1) in self._allowed_internal_collisions:
                         continue
                 
                 result = True
@@ -254,9 +260,9 @@ class URDFRobotCollisionManager(trimesh.collision.CollisionManager):
         elif return_data:
             return result, contact_data
         else:
-            return result
+            return (result,)
 
-    def in_collision_other(self, other_manager, return_names=False, return_data=False):
+    def in_collision_other(self, other_manager, return_names=False, return_data=False, acm=None):
         """
         Check if any object from this manager collides with any object
         from another manager.
@@ -294,7 +300,7 @@ class URDFRobotCollisionManager(trimesh.collision.CollisionManager):
 
         objs_in_collision = set()
         contact_data = []
-        if return_names or return_data:
+        if return_names or return_data or acm is not None:
             for contact in cdata.result.contacts:
                 reverse = False
                 names = (
@@ -307,6 +313,13 @@ class URDFRobotCollisionManager(trimesh.collision.CollisionManager):
                         other_manager._extract_name(contact.o1),
                     )
                     reverse = True
+                
+                # filter out allowed collisions
+                if acm is not None:
+                    parent_link1 = self.geom_name_to_parent_link[names[0]]
+                    parent_link2 = other_manager.geom_name_to_parent_link[names[1]]
+                    if (parent_link1, parent_link2) in acm or (parent_link2, parent_link1) in acm:
+                        continue
 
                 if return_names:
                     objs_in_collision.add(names)
@@ -322,27 +335,37 @@ class URDFRobotCollisionManager(trimesh.collision.CollisionManager):
         elif return_data:
             return result, contact_data
         else:
-            return result
+            return (result,)
 
 
 
-class URDFRobot:
+class URDFRobot(RobotInterfaceBase):
     def __init__(
             self, 
             urdf_path, 
             name='', 
+            base_transform: torch.Tensor=None,
             device="cpu", 
             setup_acm=True,
             load_visual_meshes=False,):
-        self.robot = URDF.load(
+        super().__init__(name=name, device=device)
+        self.urdf = URDF.load(
             urdf_path, 
             build_scene_graph=True,
             build_collision_scene_graph=True,
             load_meshes=load_visual_meshes,
             load_collision_meshes=True,
             force_collision_mesh=False)
-        self.name = name
-        self._device = torch.device(device)
+        base_matrix = base_transform if base_transform is not None else torch.eye(4, device=self._device)
+        self.base_transform = CoordinateTransform(base_matrix[:3, :3], base_matrix[:3, 3], device=self._device)
+        for scene in [self.urdf.collision_scene, self.urdf.scene]:
+            new_base_frame = 'world'
+            scene.graph.update(
+                frame_from=new_base_frame, frame_to=scene.graph.base_frame,
+                matrix=base_matrix.numpy()
+            )
+            scene.graph.base_frame = 'world'
+
 
         self._n_dofs = 0
         self._controlled_joints = []
@@ -352,9 +375,9 @@ class URDFRobot:
         # here we're making the joint a part of the rigid body
         # while urdfs model joints and rigid bodies separately
         # joint is at the beginning of a link
-        self._name_to_idx_map = dict()
+        self._body_name_to_idx_map = dict()
 
-        for link_idx, link in enumerate(self.robot.link_map.values()):
+        for link_idx, link in enumerate(self.urdf.link_map.values()):
             # Initialize body object
             rigid_body_params = self.get_body_parameters_from_urdf(link_idx, link)
             body = RigidBody(
@@ -370,26 +393,26 @@ class URDFRobot:
                     self._controlled_joints.append(link_idx)
                 else:
                     self._mimic_joints[
-                        self.robot.joint_map[body.joint_mimic.joint].child
+                        self.urdf.joint_map[body.joint_mimic.joint].child
                     ].append(body.name)
 
             # Add to data structures
             self._bodies.append(body)
-            self._name_to_idx_map[body.name] = link_idx
+            self._body_name_to_idx_map[body.name] = link_idx
 
         # Once all bodies are loaded, connect each body to its parent
         for body in self._bodies:
             if body.joint_name == 'base_joint':
                 continue
-            parent_body_name = self.robot.joint_map[body.joint_name].parent
-            parent_body_idx = self._name_to_idx_map[parent_body_name]
+            parent_body_name = self.urdf.joint_map[body.joint_name].parent
+            parent_body_idx = self._body_name_to_idx_map[parent_body_name]
             body.set_parent(self._bodies[parent_body_idx])
             self._bodies[parent_body_idx].add_child(body)
         
         # Calculate joint limits
         self.joint_limits = torch.zeros((self._n_dofs, 2), device=self._device)
         for i, body_idx in enumerate(self._controlled_joints):
-            joint = self.robot.joint_map[self._bodies[body_idx].joint_name]
+            joint = self.urdf.joint_map[self._bodies[body_idx].joint_name]
             self.joint_limits[i, 0] = joint.limit.lower
             self.joint_limits[i, 1] = joint.limit.upper
         
@@ -421,19 +444,27 @@ class URDFRobot:
             if other is None:
                 collision_labels[i], contacts_data  = self.collision_manager.in_collision_internal(return_data=True)
             else:
-                collision_labels[i] = self.collision_manager.in_collision_other(other.collision_manager) or \
+                collision_labels[i] = self.collision_manager.in_collision_other(other.collision_manager)[0] or \
                     self.collision_manager.in_collision_internal(return_data=True)[0]
                 
             if show:
                 print(f"in collision?: {collision_labels[i]}")
-                print(f"contact data: {[c.names for c in contacts_data]}")
-                self.robot.update_cfg(q[i].numpy())
+                # print(f"contact data: {[c.names for c in contacts_data]}")
+                self.urdf.update_cfg(q[i].numpy())
                 
-                scene = self.robot.collision_scene if self.robot.scene is None else self.robot.scene
+                scene = self.urdf.collision_scene if self.urdf.scene is None else self.urdf.scene
+                if other is not None:
+                    if isinstance(other, ShapeEnv):
+                        scene += other.scene
+                    elif isinstance(other, URDFRobot):
+                        scene += other.urdf.collision_scene if other.urdf.scene is None else other.urdf.scene
+                    else:
+                        raise NotImplementedError("other must be either a ShapeEnv or URDFRobot object to visualize")
                 points = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1],
                                    [0, 1, 1], [1, 0, 1], [1, 1, 0], [1, 1, 1]]) - [0.5, 0.5, 0]
                 scene.camera_transform = scene.camera.look_at(points)
-                scene.show()
+                trimesh.viewer.SceneViewer(scene, resolution=(800,800))
+                # scene.show(viewer='gl')
                 
         
         return collision_labels
@@ -464,21 +495,25 @@ class URDFRobot:
 
         # Call forward kinematics on root node
         pose_dict = self._bodies[0].forward_kinematics(q_dict, return_collision)
+        pose_dict = {
+            link: [self.base_transform.multiply_transform(p) for p in pose_dict[link]]
+            for link in pose_dict
+        }
 
         return {
             link: [(p.translation(), p.rotation()) for p in pose_dict[link]]
-            for link in pose_dict.keys()
+            for link in pose_dict
         }
 
     def find_joint_of_body(self, body_name):
-        for jname, joint in self.robot.joint_map.items():
+        for jname, joint in self.urdf.joint_map.items():
             if joint.child == body_name:
                 return jname
         return None
 
     def get_name_of_parent_body(self, link_name):
         jid = self.find_joint_of_body(link_name)
-        joint = self.robot.joint_map[jid]
+        joint = self.urdf.joint_map[jid]
         return joint.parent
 
     def get_body_parameters_from_urdf(self, link_idx, link):
@@ -498,7 +533,7 @@ class URDFRobot:
             joint_axis = torch.zeros((1, 3), device=self._device)
             joint_mimic = None
         else:
-            joint = self.robot.joint_map[joint_name]
+            joint = self.urdf.joint_map[joint_name]
             joint_rot_angles = torch.tensor(
                 tf.euler_from_matrix(joint.origin[:3, :3], axes='sxyz'), 
                 dtype=torch.float32, device=self._device
@@ -615,44 +650,152 @@ class URDFRobot:
         return body_params
 
 
+class MultiURDFRobot(RobotInterfaceBase):
+    '''
+    This class is used to load multiple robots at once
+    and is able to check collision between them.
+    It maitains a list of URDFRobot objects and 
+    use the set_fkine method to update the collision manager
+    of each robot and check collision between each pair of them.
+    '''
+    def __init__(
+            self, 
+            urdf_robots: List[URDFRobot]=None,
+            urdf_paths: List[str]=None, 
+            names: List[str]=None,
+            base_transforms: List[torch.Tensor]=None,
+            name: str=None,
+            device="cpu", 
+            setup_acm=True,
+            load_visual_meshes=False):
+        if urdf_robots is not None:
+            self.urdf_robots = urdf_robots
+            self.name = '_'.join([robot.name for robot in self.urdf_robots]) if name is None else name
+            self._device = self.urdf_robots[0]._device
+        else:
+            self.urdf_robots = []
+            for urdf_path, name, base_transform in zip(urdf_paths, names, base_transforms):
+                self.urdf_robots.append(
+                    URDFRobot(
+                        urdf_path, name=name, base_transform=base_transform,
+                        device=device, setup_acm=setup_acm, load_visual_meshes=load_visual_meshes
+                    )
+                )
+            self.name = '_'.join(names) if name is None else name
+            self._device = device
+        
+        self.inter_robot_acm = None
+    
+    def rand_configs(self, num_cfgs):
+        return torch.cat([robot.rand_configs(num_cfgs) for robot in self.urdf_robots], dim=1)
+    
+    def split_configs(self, q):
+        return torch.split(q, [robot._n_dofs for robot in self.urdf_robots], dim=1)
+    
+    def collision(self, q, other=None, show=False):
+        batch_size = q.shape[0]
+        collision_labels = torch.zeros(batch_size, dtype=torch.bool, device=self._device)
+        for i in range(batch_size):
+            q_i = q[i]
+            q_i_split = torch.split(q_i, [robot._n_dofs for robot in self.urdf_robots], dim=0)
+            for urdf_robot, q_i_split_i in zip(self.urdf_robots, q_i_split):
+                fk_dict = urdf_robot.compute_forward_kinematics_all_links(q_i_split_i, return_collision=True)
+                urdf_robot.collision_manager.set_fkine(fk_dict)
+            
+            if other is not None:
+                for urdf_robot in self.urdf_robots:
+                    collision_labels[i] = collision_labels[i] or urdf_robot.collision_manager.in_collision_other(other.collision_manager)[0]
+                    if collision_labels[i]:
+                        break
+            
+            if not collision_labels[i]:    
+                for j, urdf_robot1 in enumerate(self.urdf_robots):
+                    for k in range(j+1, len(self.urdf_robots)):
+                        urdf_robot2 = self.urdf_robots[k]
+                        collision_labels[i] = collision_labels[i] or  urdf_robot1.collision_manager.in_collision_other(urdf_robot2.collision_manager, acm=self.inter_robot_acm)[0] \
+                            or urdf_robot1.collision_manager.in_collision_internal(return_data=True)[0] or urdf_robot2.collision_manager.in_collision_internal(return_data=True)[0]
+                        if collision_labels[i]:
+                            break
+            
+            if show:
+                print(f"in collision?: {collision_labels[i]}")
+                # print(f"contact data: {[c.names for c in contacts_data]}")
+                for urdf_robot, q_i_split_i in zip(self.urdf_robots, q_i_split):
+                    urdf_robot.urdf.update_cfg(q_i_split_i.numpy())
+                scene = append_scenes([urdf_robot.urdf.collision_scene if urdf_robot.urdf.scene is None else urdf_robot.urdf.scene for urdf_robot in self.urdf_robots])
+                points = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1],
+                                   [0, 1, 1], [1, 0, 1], [1, 1, 0], [1, 1, 1]]) - [0.5, 0.5, 0]
+                scene.camera_transform = scene.camera.look_at(points)
+                scene.show()
+            
+        return collision_labels
+    
+    def compute_forward_kinematics_all_links(self, q, return_collision=False):
+        q_split = torch.split(q, [robot._n_dofs for robot in self.urdf_robots], dim=1)
+        fk_dicts = []
+        for robot, q_i in zip(self.urdf_robots, q_split):
+            fk_dicts.append(robot.compute_forward_kinematics_all_links(q_i, return_collision=return_collision))
+        return fk_dicts
+    
+    def update_acm(self, link_pairs):
+        if self.inter_robot_acm is None:
+            self.inter_robot_acm = set()
+        self.inter_robot_acm = self.inter_robot_acm.union(link_pairs)
+
+
 
 class KUKAiiwa(URDFRobot):
-    def __init__(self, device=None, load_visual_meshes=False):
+    def __init__(
+            self, 
+            base_transform=None,
+            device=None, load_visual_meshes=False):
         rel_urdf_path = "kuka_iiwa/urdf/iiwa7.urdf"
         self.urdf_path = os.path.join(robot_description_folder, rel_urdf_path)
         self.learnable_rigid_body_config = None
         self.name = "differentiable_kuka_iiwa"
-        super().__init__(self.urdf_path, self.name, device=device, setup_acm=True, load_visual_meshes=load_visual_meshes)
+        super().__init__(
+            self.urdf_path, self.name, base_transform,
+            device=device, setup_acm=True, load_visual_meshes=load_visual_meshes)
 
 
 class FrankaPanda(URDFRobot):
-    def __init__(self, load_gripper=False, device=None, load_visual_meshes=False):
+    def __init__(
+            self, 
+            load_gripper=False, 
+            base_transform=None,
+            device=None, 
+            load_visual_meshes=False):
         rel_urdf_path = "panda_description/urdf/panda_no_gripper.urdf" if not load_gripper else "panda_description/urdf/panda.urdf"
         self.urdf_path = os.path.join(robot_description_folder, rel_urdf_path)
-        self.learnable_rigid_body_config = None
         self.name = "urdf_franka_panda"
-        super().__init__(self.urdf_path, self.name, device=device, setup_acm=True, load_visual_meshes=load_visual_meshes)
+        super().__init__(
+            self.urdf_path, self.name, base_transform,
+            device=device, setup_acm=True, load_visual_meshes=load_visual_meshes)
 
 
 class TwoLinkRobot(URDFRobot):
-    def __init__(self, device=None, load_visual_meshes=False):
+    def __init__(
+            self, 
+            base_transform=None,
+            device=None, load_visual_meshes=False):
         rel_urdf_path = "2link_robot.urdf"
         self.urdf_path = os.path.join(robot_description_folder, rel_urdf_path)
-        self.learnable_rigid_body_config = None
         self.name = "urdf_2d_robot"
-        super().__init__(self.urdf_path, self.name, device=device, setup_acm=True, load_visual_meshes=load_visual_meshes)
+        super().__init__(
+            self.urdf_path, self.name, base_transform, 
+            device=device, setup_acm=True, load_visual_meshes=load_visual_meshes)
 
 
 class TrifingerEdu(URDFRobot):
-    def __init__(self, device=None, load_visual_meshes=False):
+    def __init__(
+            self, 
+            base_transform=None,
+            device=None, load_visual_meshes=False):
         rel_urdf_path = "trifinger_edu_description/trifinger_edu.urdf"
         self.urdf_path = os.path.join(robot_description_folder, rel_urdf_path)
-        self.learnable_rigid_body_config = None
         self.name = "trifinger_edu"
-        super().__init__(self.urdf_path, self.name, device=device, setup_acm=True, load_visual_meshes=load_visual_meshes)
-    
+        super().__init__(
+            self.urdf_path, self.name, base_transform, 
+            device=device, setup_acm=True, load_visual_meshes=load_visual_meshes)
 
-class URDFEnv:
-    def __init__(self, urdf_path):
-        raise NotImplementedError
     
