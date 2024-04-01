@@ -8,13 +8,11 @@ import trimesh.transformations as tf
 from trimesh.collision import CollisionManager
 from trimesh.primitives import Box, Sphere, Cylinder, Capsule
 
-def test_urdf(urdf_robot: URDFRobot, show=False):
+def test_urdf(urdf_robot: URDFRobot, num_cfgs=1000, show=False):
     print(urdf_robot)
     # print(list(urdf_robot.robot.link_map.values()))
     # print(urdf_robot.robot.collision_scene)
-    # print(urdf_robot.collision_manager._allowed_collisions)
 
-    num_cfgs = 1000
     cfgs = urdf_robot.rand_configs(num_cfgs)
 
     collision_labels = urdf_robot.collision(cfgs, other=None, show=show)
@@ -27,6 +25,7 @@ def test_urdf(urdf_robot: URDFRobot, show=False):
         cfgs_split = [cfgs]
     
     for urdf_robot, cfgs in zip(urdf_robots, cfgs_split):
+        print(urdf_robot.collision_manager._allowed_internal_collisions)
         print(f"Verifying forward kinematics for {urdf_robot.name}")
         for i in range(num_cfgs):
             
