@@ -141,21 +141,21 @@ class URDFRobotCollisionManager(trimesh.collision.CollisionManager):
         """
         Create an allowed collision matrix for the robot
         """
-        acm = set()
+        acm = dict()
         for body in self.urdf_robot._bodies:
             if body._parent is None:
                 continue
             parent_name = body._parent.name
             child_name = body.name
-            acm.add((parent_name, child_name))
-            acm.add((child_name, parent_name))
+            acm[(parent_name, child_name)] = 'adjacent'
+            acm[(child_name, parent_name)] = 'adjacent'
         
         if cfgs is not None:
             fk = self.urdf_robot.compute_forward_kinematics_all_links(cfgs, return_collision=True)
             num_cfgs = cfgs.shape[0]
             for i in range(num_cfgs):
                 cur_colliding_link_pairs = set()
-                self.set_fkine({k: [(t[0], r[0]) for t, r in v] for k, v in fk.items()})
+                self.set_fkine({k: [(t[i], r[i]) for t, r in v if i < len(t)] for k, v in fk.items()})
                 is_collision, contacts_data = self.in_collision_internal(return_data=True)
                 for contact in contacts_data:
                     name1, name2 = tuple(contact.names)
@@ -167,7 +167,9 @@ class URDFRobotCollisionManager(trimesh.collision.CollisionManager):
                     always_colliding = cur_colliding_link_pairs
                 else:
                     always_colliding = always_colliding.intersection(cur_colliding_link_pairs)
-            acm = acm.union(always_colliding)
+            for link_pair in always_colliding:
+                if not link_pair in acm:
+                    acm[link_pair] = 'always'
         return acm
 
 
@@ -223,7 +225,7 @@ class URDFRobotCollisionManager(trimesh.collision.CollisionManager):
           All contacts detected
         """
         cdata = fcl.CollisionData()
-        if return_names or return_data:
+        if return_names or return_data or self._allowed_internal_collisions is not None:
             cdata = fcl.CollisionData(
                 request=fcl.CollisionRequest(num_max_contacts=100000, enable_contact=True)
             )
@@ -239,6 +241,11 @@ class URDFRobotCollisionManager(trimesh.collision.CollisionManager):
             for contact in cdata.result.contacts:
                 names = (self._extract_name(contact.o1), self._extract_name(contact.o2))
 
+                if return_names:
+                    objs_in_collision.add(tuple(sorted(names)))
+                if return_data:
+                    contact_data.append(trimesh.collision.ContactData(names, contact))
+                
                 # filter out allowed collisions
                 if self._allowed_internal_collisions is not None:
                     parent_link1 = self.geom_name_to_parent_link[names[0]]
@@ -247,11 +254,6 @@ class URDFRobotCollisionManager(trimesh.collision.CollisionManager):
                         continue
                 
                 result = True
-
-                if return_names:
-                    objs_in_collision.add(tuple(sorted(names)))
-                if return_data:
-                    contact_data.append(trimesh.collision.ContactData(names, contact))
 
         if return_names and return_data:
             return result, objs_in_collision, contact_data
@@ -291,7 +293,7 @@ class URDFRobotCollisionManager(trimesh.collision.CollisionManager):
           All contacts detected
         """
         cdata = fcl.CollisionData()
-        if return_names or return_data:
+        if return_names or return_data or acm is not None:
             cdata = fcl.CollisionData(
                 request=fcl.CollisionRequest(num_max_contacts=100000, enable_contact=True)
             )
@@ -301,6 +303,7 @@ class URDFRobotCollisionManager(trimesh.collision.CollisionManager):
         objs_in_collision = set()
         contact_data = []
         if return_names or return_data or acm is not None:
+            result = False # override result unless there are disallowed collisions
             for contact in cdata.result.contacts:
                 reverse = False
                 names = (
@@ -314,19 +317,21 @@ class URDFRobotCollisionManager(trimesh.collision.CollisionManager):
                     )
                     reverse = True
                 
-                # filter out allowed collisions
-                if acm is not None:
-                    parent_link1 = self.geom_name_to_parent_link[names[0]]
-                    parent_link2 = other_manager.geom_name_to_parent_link[names[1]]
-                    if (parent_link1, parent_link2) in acm or (parent_link2, parent_link1) in acm:
-                        continue
-
                 if return_names:
                     objs_in_collision.add(names)
                 if return_data:
                     if reverse:
                         names = tuple(reversed(names))
                     contact_data.append(trimesh.collision.ContactData(names, contact))
+
+                # filter out allowed collisions
+                if acm is not None:
+                    parent_link1 = self.geom_name_to_parent_link[names[0]]
+                    parent_link2 = other_manager.geom_name_to_parent_link[names[1]]
+                    if (parent_link1, parent_link2) in acm or (parent_link2, parent_link1) in acm:
+                        continue
+                
+                result = True
 
         if return_names and return_data:
             return result, objs_in_collision, contact_data
@@ -420,7 +425,9 @@ class URDFRobot(RobotInterfaceBase):
         # and a dictionary between link names and its list of fcl collision objects
         # so that their transforms can be easily updated by forward kinematics function
         if setup_acm:
-            acm_cfgs = self.rand_configs(100)
+            num_cfgs = 100 if setup_acm < 2 else setup_acm
+            acm_cfgs = self.rand_configs(num_cfgs)
+            print(f"Setting up allowed collision matrix with {num_cfgs} random configurations")
         else:
             acm_cfgs = None
         self.collision_manager = URDFRobotCollisionManager(self, acm_cfgs=acm_cfgs)
@@ -441,15 +448,31 @@ class URDFRobot(RobotInterfaceBase):
             } # type: Dict[str, List[Tuple[torch.Tensor[3], torch.Tensor[3, 3]]]]
             self.collision_manager.set_fkine(pieces_pose)
 
-            if other is None:
-                collision_labels[i], contacts_data  = self.collision_manager.in_collision_internal(return_data=True)
-            else:
-                collision_labels[i] = self.collision_manager.in_collision_other(other.collision_manager)[0] or \
-                    self.collision_manager.in_collision_internal(return_data=True)[0]
+            contacts_data = []
+            in_collision = False
+            if other is not None:
+                ret = self.collision_manager.in_collision_other(other.collision_manager, return_data=show)
+                in_collision = ret[0]
+                if len(ret) > 1:
+                    contacts_data += ret[1]
+            if not in_collision:
+                ret = self.collision_manager.in_collision_internal(return_data=show)
+                in_collision = ret[0]
+                if len(ret) > 1:
+                    contacts_data += ret[1]
+            collision_labels[i] = in_collision
+            
                 
             if show:
+                for c in contacts_data:
+                    names = tuple(c.names)
+                    parent_link1, parent_link2 = self.collision_manager.geom_name_to_parent_link[names[0]], self.collision_manager.geom_name_to_parent_link[names[1]]
+                    if parent_link1 == parent_link2:
+                        # constant collisions between overlapping pieces of the same link
+                        continue
+                    collision_status = self.collision_manager._allowed_internal_collisions.get((parent_link1, parent_link2), 'Not allowed')
+                    print(f"{collision_status}: {parent_link1}.{names[0]}, {parent_link2}.{names[1]}")
                 print(f"in collision?: {collision_labels[i]}")
-                # print(f"contact data: {[c.names for c in contacts_data]}")
                 self.urdf.update_cfg(q[i].numpy())
                 
                 scene = self.urdf.collision_scene if self.urdf.scene is None else self.urdf.scene
@@ -464,7 +487,6 @@ class URDFRobot(RobotInterfaceBase):
                                    [0, 1, 1], [1, 0, 1], [1, 1, 0], [1, 1, 1]]) - [0.5, 0.5, 0]
                 scene.camera_transform = scene.camera.look_at(points)
                 trimesh.viewer.SceneViewer(scene, resolution=(800,800))
-                # scene.show(viewer='gl')
                 
         
         return collision_labels
@@ -483,6 +505,9 @@ class URDFRobot(RobotInterfaceBase):
             return_collision: whether to return collision geometry transforms
 
         Returns: translation and rotation of the link frame
+            {
+                link_name: [(translation: torch.Tensor[batch_size, 3], rotation: torch.Tensor[batch_size, 3, 3])]
+            }
 
         """
         # Create joint state dictionary
@@ -499,11 +524,12 @@ class URDFRobot(RobotInterfaceBase):
             link: [self.base_transform.multiply_transform(p) for p in pose_dict[link]]
             for link in pose_dict
         }
-
-        return {
+        pose_dict = {
             link: [(p.translation(), p.rotation()) for p in pose_dict[link]]
             for link in pose_dict
         }
+
+        return pose_dict
 
     def find_joint_of_body(self, body_name):
         for jname, joint in self.urdf.joint_map.items():
@@ -747,55 +773,46 @@ class MultiURDFRobot(RobotInterfaceBase):
 class KUKAiiwa(URDFRobot):
     def __init__(
             self, 
-            base_transform=None,
-            device=None, load_visual_meshes=False):
+            **kwargs):
         rel_urdf_path = "kuka_iiwa/urdf/iiwa7.urdf"
         self.urdf_path = os.path.join(robot_description_folder, rel_urdf_path)
         self.learnable_rigid_body_config = None
         self.name = "differentiable_kuka_iiwa"
         super().__init__(
-            self.urdf_path, self.name, base_transform,
-            device=device, setup_acm=True, load_visual_meshes=load_visual_meshes)
+            self.urdf_path, self.name, **kwargs)
 
 
 class FrankaPanda(URDFRobot):
     def __init__(
             self, 
             load_gripper=False, 
-            base_transform=None,
-            device=None, 
-            load_visual_meshes=False):
+            **kwargs):
         rel_urdf_path = "panda_description/urdf/panda_no_gripper.urdf" if not load_gripper else "panda_description/urdf/panda.urdf"
         self.urdf_path = os.path.join(robot_description_folder, rel_urdf_path)
         self.name = "urdf_franka_panda"
         super().__init__(
-            self.urdf_path, self.name, base_transform,
-            device=device, setup_acm=True, load_visual_meshes=load_visual_meshes)
+            self.urdf_path, self.name, **kwargs)
 
 
 class TwoLinkRobot(URDFRobot):
     def __init__(
             self, 
-            base_transform=None,
-            device=None, load_visual_meshes=False):
+            **kwargs):
         rel_urdf_path = "2link_robot.urdf"
         self.urdf_path = os.path.join(robot_description_folder, rel_urdf_path)
         self.name = "urdf_2d_robot"
         super().__init__(
-            self.urdf_path, self.name, base_transform, 
-            device=device, setup_acm=True, load_visual_meshes=load_visual_meshes)
+            self.urdf_path, self.name, **kwargs)
 
 
 class TrifingerEdu(URDFRobot):
     def __init__(
             self, 
-            base_transform=None,
-            device=None, load_visual_meshes=False):
+            **kwargs):
         rel_urdf_path = "trifinger_edu_description/trifinger_edu.urdf"
         self.urdf_path = os.path.join(robot_description_folder, rel_urdf_path)
         self.name = "trifinger_edu"
         super().__init__(
-            self.urdf_path, self.name, base_transform, 
-            device=device, setup_acm=True, load_visual_meshes=load_visual_meshes)
+            self.urdf_path, self.name, **kwargs)
 
     
