@@ -2,7 +2,7 @@ numpy
 torch
 pillow
 matplotlib
-sklearn
+scikit-learn
 tqdm
 python-fcl
 seaborn
