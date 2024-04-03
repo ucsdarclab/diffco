@@ -8,3 +8,5 @@ python-fcl
 seaborn
 pyyaml
 trimesh
+yourdfpy
+pyglet<2
