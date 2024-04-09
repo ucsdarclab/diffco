@@ -736,14 +736,21 @@ class MultiURDFRobot(RobotInterfaceBase):
         return torch.split(q, [robot._n_dofs for robot in self.urdf_robots], dim=1)
     
     def collision(self, q, other=None, show=False):
+        q_split = self.split_configs(q)
+        fk_dicts = []
+        for urdf_robot, q_per_robot in zip(self.urdf_robots, q_split):
+            fk_dicts.append(urdf_robot.compute_forward_kinematics_all_links(q_per_robot, return_collision=True))
         batch_size = q.shape[0]
         collision_labels = torch.zeros(batch_size, dtype=torch.bool, device=self._device)
         for i in range(batch_size):
-            q_i = q[i]
-            q_i_split = torch.split(q_i, [robot._n_dofs for robot in self.urdf_robots], dim=0)
-            for urdf_robot, q_i_split_i in zip(self.urdf_robots, q_i_split):
-                fk_dict = urdf_robot.compute_forward_kinematics_all_links(q_i_split_i, return_collision=True)
-                urdf_robot.collision_manager.set_fkine(fk_dict)
+            for urdf_robot, fk_dict in zip(self.urdf_robots, fk_dicts):
+                pieces_pose = {
+                    link_name: [
+                        (batch_piece_trans[i], batch_piece_rot[i])
+                            for batch_piece_trans, batch_piece_rot in batch_pieces_pose if i < len(batch_piece_rot)
+                    ] for link_name, batch_pieces_pose in fk_dict.items()
+                } # type: Dict[str, List[Tuple[torch.Tensor[3], torch.Tensor[3, 3]]]]
+                urdf_robot.collision_manager.set_fkine(pieces_pose)
             
             if other is not None:
                 for urdf_robot in self.urdf_robots:
@@ -762,6 +769,7 @@ class MultiURDFRobot(RobotInterfaceBase):
             
             if show:
                 print(f"in collision?: {collision_labels[i]}")
+                q_i_split = [q_per_robot[i] for q_per_robot in q_split]
                 # print(f"contact data: {[c.names for c in contacts_data]}")
                 for urdf_robot, q_i_split_i in zip(self.urdf_robots, q_i_split):
                     urdf_robot.urdf.update_cfg(q_i_split_i.numpy())
@@ -810,7 +818,7 @@ class FrankaPanda(URDFRobot):
             if simple_collision:
                 rel_urdf_path = "panda_description/urdf/panda_simple_collision.urdf" if load_gripper else "panda_description/urdf/panda_no_gripper_simple_collision.urdf"
             else:
-                rel_urdf_path = "panda_description/urdf/panda_no_gripper.urdf" if not load_gripper else "panda_description/urdf/panda.urdf"
+                rel_urdf_path = "panda_description/urdf/panda.urdf" if load_gripper else "panda_description/urdf/panda_no_gripper.urdf"
         self.urdf_path = os.path.join(robot_description_folder, rel_urdf_path)
         self.name = "urdf_franka_panda"
         super().__init__(

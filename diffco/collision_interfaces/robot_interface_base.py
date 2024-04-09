@@ -6,7 +6,7 @@ class RobotInterfaceBase:
         self._device = torch.device(device)
         self.base_transform = None
         self.joint_limits = None
-        self._n_dof = None
+        self._n_dofs = None
         self._controlled_joints = None
         self._mimic_joints = None
         self._bodies = None

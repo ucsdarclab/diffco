@@ -134,7 +134,6 @@ class RigidBody:
             pose_dict.update(child.forward_kinematics(q_dict, return_collision))
 
         # Apply joint pose
-        # TODO: add center of mass to pose if getting body transforms (vs link transforms)
         return {
             body_name: [joint_pose.multiply_transform(p) for p in pose_dict[body_name]]
             for body_name in pose_dict
