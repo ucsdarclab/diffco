@@ -1,4 +1,4 @@
-from diffco.collision_interfaces.urdf_interface import FrankaPanda, URDFRobot, MultiURDFRobot, robot_description_folder
+from diffco.collision_interfaces.urdf_interface import TwoLinkRobot, FrankaPanda, URDFRobot, MultiURDFRobot, robot_description_folder
 from diffco.collision_interfaces.env_interface import ShapeEnv
 import trimesh
 import fcl
@@ -30,6 +30,10 @@ if __name__ == "__main__":
             'mesh1': {'type': 'Mesh', 'params': {'file_obj': '../../assets/object_meshes/teapot.stl', 'scale': 1e-1}, 'transform': tf.translation_matrix([0, 0.5, 0])},
         }
     )
+    
+    two_link_robot = TwoLinkRobot()
+    test_urdf_vs_shapeenv(two_link_robot, shape_env, show=True)
+
 
     panda_urdf_robot = FrankaPanda(
         load_gripper=True, 
