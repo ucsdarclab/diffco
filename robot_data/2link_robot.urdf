@@ -23,6 +23,12 @@
 			<origin rpy="0 0 0" xyz="0.5 0 0"/>
 			<material name="black"/>
 		</visual>
+		<collision>
+			<geometry>
+				<box size="1 .05 .05"/>
+			</geometry>
+			<origin rpy="0 0 0" xyz="0.5 0 0"/>
+		</collision>
         <inertial>
             <origin rpy="0 0 0" xyz="0.5 0 0"/>
             <mass value="1"/>
@@ -47,6 +53,12 @@
 			<origin rpy="0 0 0" xyz="0.5 0 0"/>
 			<material name="white"/>
 		</visual>
+		<collision>
+			<geometry>
+				<box size="1 .05 .05"/>
+			</geometry>
+			<origin rpy="0 0 0" xyz="0.5 0 0"/>
+		</collision>
         <inertial>
             <origin rpy="0 0 0" xyz="0.5 0 0"/>
             <mass value="1"/>
@@ -75,7 +87,7 @@
 	<joint name="ee_joint" type="fixed">
 		<parent link="arm2"/>
 		<child link="endEffector"/>
-		<origin rpy="0 0 0" xyz="0 0 0.05"/>
+		<origin rpy="0 0 0" xyz="1 0 0.05"/>
 	</joint>
 
 </robot>
