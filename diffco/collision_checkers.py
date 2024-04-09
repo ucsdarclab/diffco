@@ -5,6 +5,7 @@
 # 
 from typing import Dict, Union
 import os
+import time
 
 from functools import partial
 
@@ -101,13 +102,17 @@ class CollisionChecker:
     def unnormalizer(self, normalized_q):
         raise NotImplementedError
     
-    def _generate_dataset(self, q, labels, dists, num_samples):
+    def _generate_dataset(self, q, labels, dists, num_samples, verbose=False):
         if q is None:
             q = self.robot.rand_configs(num_samples)
+        num_samples = len(q)
         if labels is None:
-            print('Generating labels...')
+            if verbose:
+                print('Generating labels...')
+                start_time = time.time()
             labels = self.gt_check_func(q)
-            print('Labels generated.')
+            if verbose:
+                print(f'Labels generated in {time.time()-start_time:.2f}s')
         if dists is None:
             dists = torch.zeros(num_samples)
         return q, labels, dists
@@ -127,7 +132,7 @@ class RBFDiffCo(CollisionChecker):
             gt_check_func=None,
             device='cpu',
             kernel_func=None,
-            perceptron_class: Perceptron=DiffCo,
+            perceptron_class=DiffCo,
             **perceptron_kwargs,
             ) -> None:
         super().__init__(
@@ -148,11 +153,109 @@ class RBFDiffCo(CollisionChecker):
             **perceptron_kwargs,
         )
 
+    def fit(self, q=None, labels=None, dists=None, poly_transform=None, num_samples=5000, verify_ratio=0.1, verbose=False):
+        '''
+        Used to train and update the DiffCo model.
+        When verify_ratio is 0, the model trains without a follow-up verification,
+        which is the default behavior when *updating* the model.
+        When verify_ratio is True, the model trains with the full dataset and 
+        verifies the model with self.q_verify.
+        When 0 < verify_ratio < 1, the model trains with a portion of the dataset and
+        verifies the model with the rest of the dataset.
+        '''
+        q, labels, dists = self._generate_dataset(q, labels, dists, num_samples, verbose=not self.perceptron_trained)
+        num_samples = len(q)
+        labels = (2*labels-1).type(q.dtype)
+        if 0 < verify_ratio < 1:
+            num_verify = int(verify_ratio*num_samples)
+            verify_indices = torch.randperm(len(q))[:num_verify]
+            verify_mask = torch.zeros(len(q), dtype=torch.bool)
+            verify_mask[verify_indices] = True
+            q_train, q_verify = q[~verify_mask], q[verify_mask]
+            labels_train, labels_verify = labels[~verify_mask], labels[verify_mask]
+            dists_train, dists_verify = dists[~verify_mask], dists[verify_mask]
+        else:
+            q_train = q
+            labels_train = labels
+            dists_train = dists
+
+        self.perceptron.train(q_train, labels_train, max_iteration=len(q_train), distance=dists_train, verbose=verbose)
+        inference_kernel_func = kernel.Polyharmonic(k=1, epsilon=1)
+        self.perceptron.fit_poly(kernel_func=inference_kernel_func, target='label', transform=poly_transform)
+        if not self.perceptron_trained:
+            self.q_verify = q_verify
+
+        self.safety_bias = self._calculate_safety_bias(self.q_verify)
+        # Verification needs self.safety_bias
+        if verify_ratio:
+            verify_acc, verify_tpr, verify_tnr = self.verify(self.q_verify, labels_verify)
+        else:
+            verify_acc, verify_tpr, verify_tnr = None, None, None
+        
+        self.perceptron_trained = True
+        return verify_acc, verify_tpr, verify_tnr
+
+    def update(self, q=None, labels=None, dists=None, 
+               exploit_std=0.3, num_samples=100, num_exploit_samples=None, num_explore_samples=None,
+               verify=False):
+        '''
+        Used to update the DiffCo model.
+        '''
+        num_exploit_samples = num_samples if num_exploit_samples is None else num_exploit_samples
+        num_explore_samples = num_samples if num_explore_samples is None else num_explore_samples
+        if q is None:
+            if num_samples > len(self.perceptron.support_points):
+                exploit_sample_mul = (len(self.perceptron.support_points) // num_samples) + \
+                    (len(self.perceptron.support_points) % num_samples > 0)
+                selected_indices = torch.arange(len(self.perceptron.support_points))
+            else:
+                exploit_sample_mul = 1
+                selected_indices = torch.randperm(len(self.perceptron.support_points))[:num_samples]
+            selected_support_points = self.perceptron.support_points[selected_indices]
+            exploit_samples = torch.randn(exploit_sample_mul, len(selected_support_points), self.robot._n_dofs, dtype=selected_support_points.dtype) * exploit_std + selected_support_points[None]
+            exploit_samples = torch.clamp(exploit_samples, min=self.robot.joint_limits[:, 0], max=self.robot.joint_limits[:, 1])
+            exploit_samples = exploit_samples.reshape(-1, self.robot._n_dofs)
+
+            explore_samples = self.robot.rand_configs(num_explore_samples)
+            q = torch.cat([exploit_samples, explore_samples, self.perceptron.support_points], dim=0)
+        return self.fit(q, labels, dists, verify_ratio=verify)
+
+    def verify(self, q_verify=None, labels_verify=None, num_samples=None, verbose=False):
+        if q_verify is None:
+            q_verify = self.q_verify if num_samples is None \
+                else self.robot.rand_configs(num_samples)
+        scores_verify = self.perceptron.poly_score(q_verify)
+        preds_verify = scores_verify > 0
+        biased_preds_verify = scores_verify + self.safety_bias > 0
+        preds_verify = 2 * preds_verify - 1
+        biased_preds_verify = 2 * biased_preds_verify - 1
+
+        if labels_verify is None:
+            labels_verify = self.gt_check_func(q_verify)
+            labels_verify = (2*labels_verify-1).type(q_verify.dtype)
+
+        preds_verify = preds_verify.reshape_as(labels_verify)
+        biased_preds_verify = biased_preds_verify.reshape_as(labels_verify)
+        test_acc = torch.sum(preds_verify == labels_verify, dtype=torch.float32)/len(preds_verify)
+        test_tpr = torch.sum(preds_verify[labels_verify == 1] == 1, dtype=torch.float32) / (labels_verify == 1).sum()
+        test_tnr = torch.sum(preds_verify[labels_verify == -1] == -1, dtype=torch.float32) / (labels_verify == -1).sum()
+        print('Test acc: {:.4f}, TPR {:.4f}, TNR {:.4f}'.format(test_acc, test_tpr, test_tnr))
+        if verbose and test_acc < 0.9:
+            print('test acc is only {:.4f}'.format(test_acc))
+        test_acc = torch.sum(biased_preds_verify == labels_verify, dtype=torch.float32)/len(biased_preds_verify)
+        test_tpr = torch.sum(biased_preds_verify[labels_verify == 1] == 1, dtype=torch.float32) / (labels_verify == 1).sum()
+        test_tnr = torch.sum(biased_preds_verify[labels_verify == -1] == -1, dtype=torch.float32) / (labels_verify == -1).sum()
+        print('Biased Test acc: {:.4f}, TPR {:.4f}, TNR {:.4f}'.format(test_acc, test_tpr, test_tnr))
+        if verbose and test_acc < 0.9:
+            print('Biased Test acc is only {:.4f}'.format(test_acc))
+        return test_acc, test_tpr, test_tnr
+
     def collision(self, q):
-        return self.perceptron.score(q) > 0
+        return self.collision_score(q) > 0
     
-    def collision_score(self, q):
-        return self.perceptron.score(q)
+    def collision_score(self, q, bias: Union[float, torch.Tensor]=None):
+        bias = self.safety_bias if bias is None else bias
+        return self.perceptron.poly_score(q) + bias
 
     def normalizer(self, unnormalized_q):
         '''
@@ -167,7 +270,7 @@ class RBFDiffCo(CollisionChecker):
         return normalized_q*(self.robot.joint_limits[:, 1]-self.robot.joint_limits[:, 0])+self.robot.joint_limits[:, 0]
 
 
-class ForwardKinematicsDiffCo(CollisionChecker):
+class ForwardKinematicsDiffCo(RBFDiffCo, CollisionChecker):
     '''
     The DiffCo implementation with Forward Kinematics transformation.
     Recommended for robot manipulators.
@@ -184,7 +287,8 @@ class ForwardKinematicsDiffCo(CollisionChecker):
             perceptron_class=DiffCo,
             **perceptron_kwargs,
             ) -> None:
-        super().__init__(
+        CollisionChecker.__init__(
+            self,
             robot=robot,
             robot_base_transform=robot_base_transform,
             environment=environment,
@@ -220,33 +324,9 @@ class ForwardKinematicsDiffCo(CollisionChecker):
         fk_tensor = torch.stack([pos for link_name in self.unique_position_link_names for pos, _ in fk_dict[link_name]], dim=-1)
         return fk_tensor
 
-    def train(self, q=None, labels=None, dists=None, num_samples=5000, verify_ratio=0.1):
-        '''
-        Used to train and update the DiffCo model.
-        '''
-        q, labels, dists = self._generate_dataset(q, labels, dists, num_samples)
-        labels = (2*labels-1).type(q.dtype)
-        verify_indices = torch.randperm(len(q))[:int(verify_ratio*len(q))]
-        verify_mask = torch.zeros(len(q), dtype=torch.bool)
-        verify_mask[verify_indices] = True
-        q_train, q_verify = q[~verify_mask], q[verify_mask]
-        labels_train, labels_verify = labels[~verify_mask], labels[verify_mask]
-        dists_train, dists_verify = dists[~verify_mask], dists[verify_mask]
-
-        self.perceptron.train(q_train, labels_train, max_iteration=len(q_train), distance=dists_train)
-        inference_kernel_func = kernel.Polyharmonic(k=1, epsilon=1)
-        self.perceptron.fit_poly(kernel_func=inference_kernel_func, target='label', fkine=self.tensorized_fkine)
-        if not self.perceptron_trained:
-            self.q_verify = q_verify
-
-        self.safety_bias = self._calculate_safety_bias(self.q_verify)
-        print(f'Safety bias: {self.safety_bias}')
-        # Verification needs self.safety_bias
-        if not self.perceptron_trained:
-            verify_acc, verify_tpr, verify_tnr = self._accuracy_verify(self.q_verify, labels_verify)
-        
-        self.perceptron_trained = True
-        return verify_acc, verify_tpr, verify_tnr
+    def fit(self, q=None, labels=None, dists=None, poly_transform=None, num_samples=5000, verify_ratio=0.1, verbose=False):
+        poly_transform = self.tensorized_fkine if poly_transform is None else poly_transform
+        return super().fit(q, labels, dists, poly_transform, num_samples, verify_ratio, verbose)
 
     def _calculate_safety_bias(self, q_verify):
         scores = self.perceptron.poly_score(q_verify)[:, 0]
@@ -254,37 +334,7 @@ class ForwardKinematicsDiffCo(CollisionChecker):
         max_score = scores.max()
         min_polar_abs = min(min_score.abs(), max_score.abs())
         safety_bias = min_polar_abs/3
-        print(f'min_polar_score/3 = {min_polar_abs/3}')
         return safety_bias
-
-    def _accuracy_verify(self, q_verify, labels_verify):
-        scores_verify = self.perceptron.poly_score(q_verify)
-        preds_verify = scores_verify > 0
-        biased_preds_verify = scores_verify + self.safety_bias > 0
-        preds_verify = 2 * preds_verify - 1
-        biased_preds_verify = 2 * biased_preds_verify - 1
-        preds_verify = preds_verify.reshape_as(labels_verify)
-        biased_preds_verify = biased_preds_verify.reshape_as(labels_verify)
-        test_acc = torch.sum(preds_verify == labels_verify, dtype=torch.float32)/len(preds_verify)
-        test_tpr = torch.sum(preds_verify[labels_verify == 1] == 1, dtype=torch.float32) / (labels_verify == 1).sum()
-        test_tnr = torch.sum(preds_verify[labels_verify == -1] == -1, dtype=torch.float32) / (labels_verify == -1).sum()
-        print('Test acc: {:.4f}, TPR {:.4f}, TNR {:.4f}'.format(test_acc, test_tpr, test_tnr))
-        if test_acc < 0.9:
-            print('test acc is only {:.4f}'.format(test_acc))
-        test_acc = torch.sum(biased_preds_verify == labels_verify, dtype=torch.float32)/len(biased_preds_verify)
-        test_tpr = torch.sum(biased_preds_verify[labels_verify == 1] == 1, dtype=torch.float32) / (labels_verify == 1).sum()
-        test_tnr = torch.sum(biased_preds_verify[labels_verify == -1] == -1, dtype=torch.float32) / (labels_verify == -1).sum()
-        print('Biased Test acc: {:.4f}, TPR {:.4f}, TNR {:.4f}'.format(test_acc, test_tpr, test_tnr))
-        if test_acc < 0.9:
-            print('Biased Test acc is only {:.4f}'.format(test_acc))
-        return test_acc, test_tpr, test_tnr
-    
-    def collision(self, q):
-        return self.collision_score(q) > 0
-    
-    def collision_score(self, q, bias: Union[float, torch.Tensor]=None):
-        bias = self.safety_bias if bias is None else bias
-        return self.perceptron.poly_score(q) + bias
 
     def normalizer(self, unnormalized_q):
         return (unnormalized_q-self.robot.joint_limits[:, 0])/(self.robot.joint_limits[:, 1]-self.robot.joint_limits[:, 0])
