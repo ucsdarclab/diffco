@@ -1,4 +1,4 @@
-from diffco.collision_interfaces.urdf_interface import FrankaPanda, URDFRobot, MultiURDFRobot, robot_description_folder
+from diffco.collision_interfaces.urdf_interface import TwoLinkRobot, FrankaPanda, URDFRobot, MultiURDFRobot, robot_description_folder
 import trimesh
 import fcl
 import numpy as np
@@ -52,11 +52,21 @@ def test_urdf(urdf_robot: URDFRobot, num_cfgs=1000, show=False):
         print(f"Forward kinematics of {urdf_robot.name} verified")
 
 if __name__ == "__main__":
+    two_link_robot = TwoLinkRobot()
+    test_urdf(two_link_robot, show=False)
+
     panda_urdf_robot = FrankaPanda(
         load_gripper=True, 
         base_transform=torch.eye(4),
         device="cpu", load_visual_meshes=True)
     test_urdf(panda_urdf_robot, show=False)
+
+    panda_simple_collision_urdf_robot = FrankaPanda(
+        simple_collision=True,
+        load_gripper=False,
+        load_visual_meshes=False
+    )
+    test_urdf(panda_simple_collision_urdf_robot, show=False)
     
     base_transform = torch.tensor(tf.translation_matrix([0.5, 0, 0.5]), dtype=torch.float32)
     hand_urdf_robot = URDFRobot(
@@ -78,5 +88,16 @@ if __name__ == "__main__":
         device="cpu"
     )
     test_urdf(multi_urdf_robot, show=False)
+
+    fetch_urdf_robot = URDFRobot(
+        urdf_path=os.path.join(
+            robot_description_folder, 
+            "fetch_description/urdf/fetch.urdf"),
+        name="fetch",
+        device="cpu",
+        load_visual_meshes=False
+    )
+    fetch_urdf_robot.collision_manager._allowed_internal_collisions[('base_link', 'bellows_link2')] = 'always'
+    test_urdf(fetch_urdf_robot, show=False)
 
     print("All tests passed")

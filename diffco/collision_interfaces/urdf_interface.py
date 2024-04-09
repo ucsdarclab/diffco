@@ -356,7 +356,7 @@ class URDFRobot(RobotInterfaceBase):
         super().__init__(name=name, device=device)
         self.urdf = URDF.load(
             urdf_path, 
-            build_scene_graph=True,
+            build_scene_graph=load_visual_meshes,
             build_collision_scene_graph=True,
             load_meshes=load_visual_meshes,
             load_collision_meshes=True,
@@ -364,6 +364,8 @@ class URDFRobot(RobotInterfaceBase):
         base_matrix = base_transform if base_transform is not None else torch.eye(4, device=self._device)
         self.base_transform = CoordinateTransform(base_matrix[:3, :3], base_matrix[:3, 3], device=self._device)
         for scene in [self.urdf.collision_scene, self.urdf.scene]:
+            if scene is None:
+                continue
             new_base_frame = 'world'
             scene.graph.update(
                 frame_from=new_base_frame, frame_to=scene.graph.base_frame,
@@ -418,8 +420,16 @@ class URDFRobot(RobotInterfaceBase):
         self.joint_limits = torch.zeros((self._n_dofs, 2), device=self._device)
         for i, body_idx in enumerate(self._controlled_joints):
             joint = self.urdf.joint_map[self._bodies[body_idx].joint_name]
-            self.joint_limits[i, 0] = joint.limit.lower
-            self.joint_limits[i, 1] = joint.limit.upper
+            if joint.type == "revolute" or joint.type == "prismatic":
+                if joint.limit is not None:
+                    self.joint_limits[i, 0] = joint.limit.lower
+                    self.joint_limits[i, 1] = joint.limit.upper
+                else:
+                    self.joint_limits[i, 0] = -np.pi
+                    self.joint_limits[i, 1] = np.pi
+            elif joint.type == "continuous":
+                self.joint_limits[i, 0] = -2*np.pi
+                self.joint_limits[i, 1] = 2*np.pi
         
         # Collision manager maintains a fcl.DynamicAABBTreeCollisionManager,
         # and a dictionary between link names and its list of fcl collision objects
@@ -464,14 +474,21 @@ class URDFRobot(RobotInterfaceBase):
             
                 
             if show:
+                colliding_links = dict()
                 for c in contacts_data:
                     names = tuple(c.names)
-                    parent_link1, parent_link2 = self.collision_manager.geom_name_to_parent_link[names[0]], self.collision_manager.geom_name_to_parent_link[names[1]]
+                    parent_link1 = self.collision_manager.geom_name_to_parent_link.get(names[0], None)
+                    parent_link2 = self.collision_manager.geom_name_to_parent_link.get(names[1], None)
                     if parent_link1 == parent_link2:
                         # constant collisions between overlapping pieces of the same link
                         continue
                     collision_status = self.collision_manager._allowed_internal_collisions.get((parent_link1, parent_link2), 'Not allowed')
-                    print(f"{collision_status}: {parent_link1}.{names[0]}, {parent_link2}.{names[1]}")
+                    link_pair = tuple(sorted([parent_link1, parent_link2]))
+                    if link_pair not in colliding_links:
+                        colliding_links[link_pair] = collision_status
+                    # print(f"{collision_status}: {parent_link1}.{names[0]}, {parent_link2}.{names[1]}")
+                for link_pair, collision_status in colliding_links.items():
+                    print(f"{collision_status}: {link_pair[0]}, {link_pair[1]}")
                 print(f"in collision?: {collision_labels[i]}")
                 self.urdf.update_cfg(q[i].numpy())
                 
@@ -785,9 +802,15 @@ class KUKAiiwa(URDFRobot):
 class FrankaPanda(URDFRobot):
     def __init__(
             self, 
+            rel_urdf_path=None,
+            simple_collision=False,
             load_gripper=False, 
             **kwargs):
-        rel_urdf_path = "panda_description/urdf/panda_no_gripper.urdf" if not load_gripper else "panda_description/urdf/panda.urdf"
+        if rel_urdf_path is None:
+            if simple_collision:
+                rel_urdf_path = "panda_description/urdf/panda_simple_collision.urdf" if load_gripper else "panda_description/urdf/panda_no_gripper_simple_collision.urdf"
+            else:
+                rel_urdf_path = "panda_description/urdf/panda_no_gripper.urdf" if not load_gripper else "panda_description/urdf/panda.urdf"
         self.urdf_path = os.path.join(robot_description_folder, rel_urdf_path)
         self.name = "urdf_franka_panda"
         super().__init__(

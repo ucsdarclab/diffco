@@ -99,7 +99,7 @@ class RigidBody:
             fixed_rotation = (z_rot(yaw) @ y_rot(pitch)) @ x_rot(roll)
             fixed_translation = self.joint_trans().reshape(1, 3)
 
-            if self.joint_type == "revolute":
+            if self.joint_type in ["revolute", "continuous"]:
                 if torch.abs(self.joint_axis[0, 0]) == 1:
                     rot = x_rot(torch.sign(self.joint_axis[0, 0]) * q)
                 elif torch.abs(self.joint_axis[0, 1]) == 1:
