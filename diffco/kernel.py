@@ -72,8 +72,6 @@ class Polyharmonic(KernelFunc):
             xs = xs[np.newaxis, :]
         r = torch.cdist(xs, x_primes)
         kvalues = self._func(r) / self.epsilon
-        if kvalues.shape[1] == 1:
-            kvalues = kvalues.squeeze(1)
         return kvalues
         
 

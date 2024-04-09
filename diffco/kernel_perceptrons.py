@@ -10,14 +10,17 @@ from . import kernel
 from .Obstacles import Obstacle
 
 
-class CollisionChecker():
-    def __init__(self, obstacles):
-        self.obstacles = obstacles
+class Perceptron():
+    def __init__(self):
+        pass
     
     def predict(self, point):
         return torch.any(torch.stack([obs.is_collision(point) for obs in self.obstacles], dim=1), dim=1)
     
-    def line_collision(self, start, target, res=50):
+    def score(self, point):
+        raise NotImplementedError
+    
+    def line_predict(self, start, target, res=50):
         points = map(lambda i: start + (target - start)/res*i, range(res))
         return any(map(lambda p: self.is_collision(p), points))
     
@@ -26,9 +29,9 @@ class CollisionChecker():
     
 
 
-class DiffCo(CollisionChecker):
-    def __init__(self, obstacles, kernel_func='rq', gamma=1, beta=1, gt_checker=None):
-        super().__init__(obstacles)
+class DiffCo(Perceptron):
+    def __init__(self, kernel_func='rq', gamma=1, beta=1):
+        super().__init__()
         # self.gt_checker = gt_checker if gt_checker is not None else CollisionChecker(self.obstacles)
         self.train_method = None
         self.kernel_func = kernel.RQKernel(gamma) if kernel_func=='rq' else kernel_func
@@ -49,7 +52,10 @@ class DiffCo(CollisionChecker):
             self.train_svm()
         
         if not keep_all:
-            self.filter_support_points_(self.gains != 0)
+            mask = self.gains != 0
+            if mask.sum() < 2:
+                mask[torch.where(mask == 0)[0][0]] = True
+            self.filter_support_points_(mask)
         time_elapsed = time() - time_start
         print('{} training done. {:.4f} secs cost'.format(method, time_elapsed))
     
@@ -278,7 +284,7 @@ class DiffCo(CollisionChecker):
 
         # model.initialize(3000)
         X = torch.rand(8000, 2) * 10
-        gt_checker = CollisionChecker(model.obstacles)
+        gt_checker = Perceptron(model.obstacles)
         Y = gt_checker.predict(X).float() * 2 - 1
 
         model.train(X, Y, max_iteration=len(X), method='original')
