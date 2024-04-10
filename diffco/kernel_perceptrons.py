@@ -12,7 +12,7 @@ from .Obstacles import Obstacle
 
 class Perceptron():
     def __init__(self):
-        pass
+        self.support_points = None
     
     def predict(self, point):
         return torch.any(torch.stack([obs.is_collision(point) for obs in self.obstacles], dim=1), dim=1)
@@ -30,22 +30,29 @@ class Perceptron():
 
 
 class DiffCo(Perceptron):
-    def __init__(self, kernel_func='rq', gamma=1, beta=1):
+    def __init__(self, kernel_func='rq', gamma=1, beta=1, transform=None):
         super().__init__()
         # self.gt_checker = gt_checker if gt_checker is not None else CollisionChecker(self.obstacles)
         self.train_method = None
         self.kernel_func = kernel.RQKernel(gamma) if kernel_func=='rq' else kernel_func
         # self.gamma = self.kernel_func.gamma #C0.2 # 1/(2*self.support_points.var())
         self.beta = beta
-        self.fkine = None
+        self.transform = transform
         self._cuda = False
 
-    def train(self, X, y, max_iteration=1000, method='original', distance=None, keep_all=False):
+        self.support_points = None
+        self.gains = None
+        self.hypothesis = None
+        self.y = None
+        self.distance = None
+        self.kernel_matrix = None
+
+    def train(self, X, y, max_iteration=1000, method='original', distance=None, keep_all=False, verbose=False):
         self.train_method = method
         self.distance = distance.reshape(-1) if distance is not None else None
         time_start = time()
         if method == 'original':
-            self.train_perceptron(X, y, max_iteration)
+            self.train_perceptron(X, y, max_iteration, verbose=verbose)
         elif method == 'sgd':
             self.train_sgd(max_iteration)
         elif method == 'svm':
@@ -57,25 +64,29 @@ class DiffCo(Perceptron):
                 mask[torch.where(mask == 0)[0][0]] = True
             self.filter_support_points_(mask)
         time_elapsed = time() - time_start
-        print('{} training done. {:.4f} secs cost'.format(method, time_elapsed))
+        if verbose:
+            print('{} training done. {:.4f} secs cost'.format(method, time_elapsed))
     
     def filter_support_points_(self, mask):
         self.support_points = self.support_points[mask]
+        self.support_transformed = self.support_points if self.transform is None else self.support_transformed[mask]
         self.hypothesis = self.hypothesis[mask]
         self.y = self.y[mask]
         self.distance = self.distance[mask] if self.distance is not None else None
         self.gains = self.gains[mask]
         self.kernel_matrix = self.kernel_matrix[np.ix_(mask, mask)]
 
-    def train_perceptron(self, X, y, max_iteration=1000):
+    def train_perceptron(self, X, y, max_iteration=1000, verbose=False):
         self.initialize(X, y)
         
-        print('DiffCo training...')
-        for it in tqdm(range(max_iteration)):
+        if verbose:
+            print('DiffCo training...')
+            start_time = time()
+        for it in tqdm(range(max_iteration), ncols=0, dynamic_ncols=False, disable=not verbose):
             margin = self.y * self.hypothesis
             min_margin, min_i = torch.min(margin, 0)  #1./
             if self.kernel_matrix[min_i, min_i] == 0:
-                self.kernel_matrix[min_i] = self.kernel_func(self.support_points[min_i], self.support_points)
+                self.kernel_matrix[min_i] = self.kernel_func(self.support_transformed[min_i], self.support_transformed)
                 self.kernel_matrix[:, min_i] = self.kernel_matrix[min_i]
                 # print(self.kernel_matrix[:, min_i], self.kernel_matrix[:, min_i].max(), self.kernel_matrix[:, min_i].min())
             if min_margin <= 0:
@@ -96,13 +107,14 @@ class DiffCo(Perceptron):
 
             break
 
-        print('Ended at iteration {}'.format(it))
-
-        
-        print('ACC: {}'.format(torch.sum((self.hypothesis > 0) == (self.y > 0)) / float(len(self.y))))
+        if verbose:
+            print(f'Ended at iteration {it}, cost {time()-start_time:.4f} secs')
+            print('ACC: {}'.format(torch.sum((self.hypothesis > 0) == (self.y > 0)) / float(len(self.y))))
     
     def initialize(self, X, y):
         self.support_points = X.clone()
+        self.support_transformed = self.support_points if self.transform is None \
+            else self.transform(self.support_points)
         self.y = y.reshape(-1).clone()
         assert len(y) == len(X)
         num_init_points = len(X)
@@ -150,12 +162,8 @@ class DiffCo(Perceptron):
         # print('Gains: ', self.svm.dual_coef_)
         print('ACC: {}'.format(np.sum((self.svm.predict(self.support_points) > 0) == (self.y > 0)) / len(self.y)))
     
-    def fit_poly(self, kernel_func=None, target='hypo', fkine=None): #epsilon=None, 
-        X = self.support_points
-        if fkine is not None:
-            X = fkine(X).reshape([len(X), -1])
-            self.fkine = fkine
-            self.support_fkine = X
+    def fit_poly(self, kernel_func=None, target='hypo'):
+        X = self.support_transformed
         if target == 'hypo':
             y = self.hypothesis
         elif 'dist' in target:
@@ -172,8 +180,8 @@ class DiffCo(Perceptron):
     
     def cuda(self):
         self.support_points = self.support_points.cuda()
-        if self.fkine is not None:
-            self.support_fkine = self.support_fkine.cuda()
+        if self.transform is not None:
+            self.support_transformed = self.support_transformed.cuda()
         self.rbf_nodes = self.rbf_nodes.cuda()
         self._cuda = True
     
@@ -185,23 +193,16 @@ class DiffCo(Perceptron):
         if point.ndim == 1:
             point = point[np.newaxis, :]
         point = point.to(device=self.rbf_nodes.device, dtype=self.rbf_nodes.dtype)
-        if self.fkine is not None:
-            point = self.fkine(point).reshape([len(point), -1])
-            supports = self.support_fkine
-        else:
-            supports = self.support_points
+        if self.transform is not None:
+            point = self.transform(point)
+        supports = self.support_transformed
         return torch.matmul(self.rbf_kernel(point, supports), self.rbf_nodes.unsqueeze(1))
     
-    def fit_full_poly(self, epsilon=1, k=2, lmbd=0, target='hypo', fkine=None):
-        X = self.support_points
-        if fkine is not None:
-            X = fkine(X).reshape([len(X), -1])
-            self.fkine = fkine
-            self.support_fkine = X
+    def fit_full_poly(self, epsilon=1, k=2, lmbd=0, target='hypo'):
+        X = self.support_transformed
         self.poly_kernel = kernel.Polyharmonic(k=k, epsilon=epsilon)
         phi = self.poly_kernel(X, X)
         phi.fill_diagonal_(lmbd)
-        print(phi.shape)
         l1 = torch.cat([phi, X, torch.ones((len(X), 1))], dim=1)
         l2 = torch.cat([X.T, torch.zeros((X.shape[1], X.shape[1]+1))], dim=1)
         l3 = torch.cat([torch.ones((1, len(X))), torch.zeros(1, X.shape[1]+1)], dim=1)
@@ -220,11 +221,9 @@ class DiffCo(Perceptron):
     def full_poly_score(self, point):
         if point.ndim == 1:
             point = point[np.newaxis, :]
-        if self.fkine is not None:
-            point = self.fkine(point).reshape([len(point), -1])
-            supports = self.support_fkine
-        else:
-            supports = self.support_points
+        if self.transform is not None:
+            point = self.transform(point).reshape([len(point), -1])
+        supports = self.support_transformed
         phi_x = torch.cat(
             [self.poly_kernel(point, supports), point, torch.ones(len(point), 1)], 
             dim=1)
@@ -245,7 +244,11 @@ class DiffCo(Perceptron):
 
     def score_original(self, point):
         # kernel_values = 1/(1+self.gamma/2*np.sum((self.support_points-point)**2, axis=1))**2
-        kernel_values = self.kernel_func(point, self.support_points)
+        if point.ndim == 1:
+            point = point[np.newaxis, :]
+        if self.transform is not None:
+            point = self.transform(point)
+        kernel_values = self.kernel_func(point, self.support_transformed)
         score = torch.matmul(kernel_values, self.gains)#.unsqueeze_(1))
         return score
     

@@ -15,10 +15,11 @@ class RQKernel(KernelFunc):
         self.p = p
 
     def __call__(self, xs, x_primes):
-        if xs.ndim == 1:
-            xs = xs[np.newaxis, :]
-        xs = xs[:, np.newaxis] # change to [1, len(x), channel]
-        pair_diff = x_primes[np.newaxis, :] - xs
+        if xs.ndim < x_primes.ndim:
+            xs = xs[[None] * (x_primes.ndim - xs.ndim)]
+        xs = xs.reshape(len(xs), -1)
+        x_primes = x_primes.reshape(len(x_primes), -1)
+        pair_diff = x_primes[None, :] - xs[:, None]
         kvalues = (1/(1+self.gamma/self.p*torch.sum(pair_diff**2, dim=2))**self.p)
         if kvalues.shape[0] == 1:
             kvalues = kvalues.squeeze_(0)
@@ -68,9 +69,10 @@ class Polyharmonic(KernelFunc):
             self._func = _odd_func
     
     def __call__(self, xs, x_primes):
-        if xs.ndim == 1:
-            xs = xs[np.newaxis, :]
-        r = torch.cdist(xs, x_primes)
+        # TODO: take care of shape outside of this function
+        if xs.ndim < x_primes.ndim:
+            xs = xs[[None] * (x_primes.ndim - xs.ndim)]
+        r = torch.cdist(xs.view(len(xs), -1), x_primes.view(len(x_primes), -1))
         kvalues = self._func(r) / self.epsilon
         return kvalues
         
@@ -126,6 +128,7 @@ class TangentKernel(KernelFunc):
 
 class FKKernel(KernelFunc):
     def __init__(self, fkine, rq_kernel):
+        raise DeprecationWarning('This class is deprecated. Specify the transform in kernel_perceptrons.DiffCo directly.')
         self.fkine = fkine
         self.rq_kernel = rq_kernel
     

@@ -153,7 +153,7 @@ def main(datapath, total_num_cfgs, key=None, exp_unique_key=None):
 
     fitting_target = 'label' # {label, dist, hypo}
     Epsilon = 1 #0.01
-    checker.fit_poly(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine)#, reg=0.09) # epsilon=Epsilon,
+    checker.fit_poly(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target)
     dist_est = checker.rbf_score
     min_score = dist_est(cfgs[train_num:]).min().item()
     print('MIN_SCORE = {:.6f}'.format(min_score))

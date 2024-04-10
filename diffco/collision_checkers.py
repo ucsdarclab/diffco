@@ -153,7 +153,7 @@ class RBFDiffCo(CollisionChecker):
             **perceptron_kwargs,
         )
 
-    def fit(self, q=None, labels=None, dists=None, poly_transform=None, num_samples=5000, verify_ratio=0.1, verbose=False):
+    def fit(self, q=None, labels=None, dists=None, num_samples=5000, verify_ratio=0.1, verbose=False):
         '''
         Used to train and update the DiffCo model.
         When verify_ratio is 0, the model trains without a follow-up verification,
@@ -181,7 +181,7 @@ class RBFDiffCo(CollisionChecker):
 
         self.perceptron.train(q_train, labels_train, max_iteration=len(q_train), distance=dists_train, verbose=verbose)
         inference_kernel_func = kernel.Polyharmonic(k=1, epsilon=1)
-        self.perceptron.fit_poly(kernel_func=inference_kernel_func, target='label', transform=poly_transform)
+        self.perceptron.fit_poly(kernel_func=inference_kernel_func, target='label')
         if not self.perceptron_trained:
             self.q_verify = q_verify
 
@@ -200,6 +200,7 @@ class RBFDiffCo(CollisionChecker):
                verify=False):
         '''
         Used to update the DiffCo model.
+        TODO: change the DiffCo perceptron class so it can update without re-initailize the model.
         '''
         num_exploit_samples = num_samples if num_exploit_samples is None else num_exploit_samples
         num_explore_samples = num_samples if num_explore_samples is None else num_explore_samples
@@ -298,16 +299,16 @@ class ForwardKinematicsDiffCo(RBFDiffCo, CollisionChecker):
             device=device,
         )
         self.unique_position_link_names = []
+        # TODO: remove base joints as its position is fixed
         for link_body in self.robot._bodies:
             if torch.any(link_body.joint_trans() != 0):
                 self.unique_position_link_names.append(link_body.name)
         print(f'Unique position link names: {self.unique_position_link_names}')
-        self.kernel_func = kernel.FKKernel(
-            partial(self.tensorized_fkine, return_collision=False),
-            kernel.RQKernel(perceptron_kwargs.pop('gamma', 10)),
-        )
+        self.kernel_func = kernel.RQKernel(perceptron_kwargs.pop('gamma', 10))
+        self.kernel_transform = partial(self.tensorized_fkine, return_collision=False)
         self.perceptron = perceptron_class(
             kernel_func=self.kernel_func,
+            transform=self.kernel_transform,
             **perceptron_kwargs,
         )
         
@@ -324,9 +325,8 @@ class ForwardKinematicsDiffCo(RBFDiffCo, CollisionChecker):
         fk_tensor = torch.stack([pos for link_name in self.unique_position_link_names for pos, _ in fk_dict[link_name]], dim=-1)
         return fk_tensor
 
-    def fit(self, q=None, labels=None, dists=None, poly_transform=None, num_samples=5000, verify_ratio=0.1, verbose=False):
-        poly_transform = self.tensorized_fkine if poly_transform is None else poly_transform
-        return super().fit(q, labels, dists, poly_transform, num_samples, verify_ratio, verbose)
+    def fit(self, q=None, labels=None, dists=None, num_samples=5000, verify_ratio=0.1, verbose=False):
+        return super().fit(q, labels, dists, num_samples, verify_ratio, verbose)
 
     def _calculate_safety_bias(self, q_verify):
         scores = self.perceptron.poly_score(q_verify)[:, 0]

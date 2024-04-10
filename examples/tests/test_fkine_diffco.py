@@ -96,7 +96,7 @@ class TestForwardKinematicsDiffCo(unittest.TestCase):
         
         print(f'GT collision check took {gt_time:.4f} seconds on {num_configs} configs.')
         print(f'DiffCo collision check took {dc_time:.4f} seconds on {num_configs} configs.')
-        # self.assertLessEqual(dc_time, gt_time+1e-4)
+        self.assertLessEqual(dc_time, gt_time+1e-4)
 
     
     def test_active_learning_twolink(self):
@@ -149,7 +149,7 @@ class TestForwardKinematicsDiffCo(unittest.TestCase):
             robot=panda_urdf_robot,
             environment=shape_env,
         )
-        acc, tpr, tnr = fkdc.fit(num_samples=3000)
+        acc, tpr, tnr = fkdc.fit(num_samples=3000, verbose=True)
 
         shape_env.update_transform('box1', tf.translation_matrix([0.4, 0.4, 0.4]))
         shape_env.update_transform('sphere1', tf.translation_matrix([0.4, 0, 0.4]))

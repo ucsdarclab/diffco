@@ -233,7 +233,7 @@ def test_one_env(env_name, optim_method, folder, args: ExpConfigs, prev_rec=None
 
         fitting_target = 'label' # {label, dist, hypo}
         Epsilon = 1 #0.01
-        checker.fit_poly(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine)#, reg=0.09) # epsilon=Epsilon,
+        checker.fit_poly(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target)
         # checker.fit_full_poly(epsilon=Epsilon, target=fitting_target, fkine=fkine)#, lmbd=80)
         # ========================
         # ONLY for additional training timing exp

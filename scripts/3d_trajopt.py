@@ -582,7 +582,7 @@ def get_diffco_model(obstacles=None, fkine=None, train_cfgs=None, train_labels=N
 def fit_dist_model(model: DiffCo, fkine, test_cfgs):
     fitting_target = 'label' # {label, dist, hypo}
     Epsilon = 1.0
-    model.fit_poly(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target, fkine=fkine)
+    model.fit_poly(kernel_func=kernel.Polyharmonic(1, Epsilon), target=fitting_target)
     dist_est = model.rbf_score
     min_score = dist_est(test_cfgs).min().item()
     print('MIN_SCORE = {}'.format(min_score))
