@@ -52,6 +52,18 @@ def test_urdf(urdf_robot: URDFRobot, num_cfgs=1000, show=False):
         print(f"Forward kinematics of {urdf_robot.name} verified")
 
 if __name__ == "__main__":
+    dvrk_urdf_robot = URDFRobot(
+        urdf_path=os.path.join(
+            robot_description_folder, 
+            "dvrk_model/urdf/both_sca.urdf"),
+        name="dvrk",
+        device="cpu",
+        load_visual_meshes=True
+    )
+    test_urdf(dvrk_urdf_robot, show=True)
+
+    exit()
+
     two_link_robot = TwoLinkRobot()
     test_urdf(two_link_robot, show=False)
 
