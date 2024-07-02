@@ -10,15 +10,15 @@ class KernelFunc:
 
 
 class RQKernel(KernelFunc):
-    def __init__(self, gamma, p=2):
+    def __init__(self, gamma: float, p: int=2):
         self.gamma = gamma
         self.p = p
 
     def __call__(self, xs, x_primes):
         if xs.ndim < x_primes.ndim:
             xs = xs[[None] * (x_primes.ndim - xs.ndim)]
-        xs = xs.reshape(len(xs), -1)
-        x_primes = x_primes.reshape(len(x_primes), -1)
+        xs = xs.reshape(xs.shape[0], -1)
+        x_primes = x_primes.reshape(x_primes.shape[0], -1)
         pair_diff = x_primes[None, :] - xs[:, None]
         kvalues = (1/(1+self.gamma/self.p*torch.sum(pair_diff**2, dim=2))**self.p)
         if kvalues.shape[0] == 1:

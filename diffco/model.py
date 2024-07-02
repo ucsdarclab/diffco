@@ -431,7 +431,7 @@ class PandaFK(Model):
         q = torch.reshape(q, (-1, self.dof))
         angles = q + self.dhparams.theta
         tfs = DH2mat(angles, self.dhparams.a, self.dhparams.d, self.s_alpha, self.c_alpha)
-        assert tfs.shape == (len(q), self.dof, 4, 4)
+        # assert tfs.shape == (len(q), self.dof, 4, 4)
         cum_tfs = []
         tmp_tf = tfs[:, 0]
         if self.fk_mask[0]:

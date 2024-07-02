@@ -5,7 +5,7 @@ import torch
 import numpy as np
 import time
 from . import utils
-from . import DiffCo
+from .kernel_perceptrons import DiffCo
 from scipy.optimize import minimize, NonlinearConstraint
 
 

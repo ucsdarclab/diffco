@@ -319,10 +319,13 @@ class ForwardKinematicsDiffCo(RBFDiffCo, CollisionChecker):
 
     
     def tensorized_fkine(self, q, return_collision=False):
+        # start_time = time.time()
         fk_dict = self.fkine(q, return_collision=return_collision)
         # Stack the positions of every piece of every link. By default only joint poses are stacked,
         # i.e., one piece for each link in self.unique_position_link_names
         fk_tensor = torch.stack([pos for link_name in self.unique_position_link_names for pos, _ in fk_dict[link_name]], dim=-1)
+        # end_time = time.time()
+        # print(f'tensor FK time: {end_time-start_time:.6f}s')
         return fk_tensor
 
     def fit(self, q=None, labels=None, dists=None, num_samples=5000, verify_ratio=0.1, verbose=False):

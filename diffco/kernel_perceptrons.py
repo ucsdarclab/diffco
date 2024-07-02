@@ -7,7 +7,6 @@ from scipy.interpolate import Rbf
 from tqdm import tqdm
 from time import time
 from . import kernel
-from .Obstacles import Obstacle
 
 
 class Perceptron():
@@ -35,7 +34,6 @@ class DiffCo(Perceptron):
         # self.gt_checker = gt_checker if gt_checker is not None else CollisionChecker(self.obstacles)
         self.train_method = None
         self.kernel_func = kernel.RQKernel(gamma) if kernel_func=='rq' else kernel_func
-        # self.gamma = self.kernel_func.gamma #C0.2 # 1/(2*self.support_points.var())
         self.beta = beta
         self.transform = transform
         self._cuda = False
@@ -118,11 +116,7 @@ class DiffCo(Perceptron):
         self.y = y.reshape(-1).clone()
         assert len(y) == len(X)
         num_init_points = len(X)
-        # self.support_points = torch.rand((num_init_points, 2), dtype=torch.float32) * 10
         self.gains = torch.zeros(num_init_points, dtype=X.dtype)
-        # K = np.tile(self.support_points[np.newaxis, :], (num_init_points, 1, 1))
-        # self.kernel_matrix = (self.support_points@self.support_points.T+1)**2
-        # self.kernel_matrix = 1/(1+self.gamma/2*np.sum((K-K.transpose(1, 0, 2))**2, axis=2))**2
         self.kernel_matrix = torch.zeros((num_init_points, num_init_points), dtype=X.dtype)
         self.hypothesis = torch.zeros(num_init_points, dtype=X.dtype)
         self.max_n_support = 200  # TODO
@@ -763,41 +757,6 @@ class MultiDiffCo(DiffCo):
         # fig.colorbar(c, ax=ax2)
 
         plt.show(block=False)
-
-
-def test_multi_diffco():
-    obstacles = [
-        ('circle', (2, 1), 1.5),
-        ('rect', (5, 7), (5, 3))]
-    obstacles = [Obstacle(*param) for param in obstacles]
-
-    np.random.seed(1314)
-    classifier = MultiDiffCo(obstacles, len(obstacles), gamma=1, beta=1)
-    # classifier.train(1000)
-    print(classifier.gains, classifier.gains.size)
-    classifier.vis(200)
-    plt.show()
-    print(classifier.score([5, 7]))
-
-
-def test_diffco():
-    import kernel
-    obstacles = [
-        ('circle', (6, 2), 2),
-        # ('circle', (2, 7), 1),
-        ('rect', (3.5, 6), (2, 1)),
-        ('rect', (4, 7), 1),
-        ('rect', (5, 8), (10, 1)),
-        ('rect', (7.5, 6), (2, 1)),
-        ('rect', (8, 7), 1),]
-    obstacles = [Obstacle(*param) for param in obstacles]
-    # kernel = kernel.CauchyKernel(100)
-    # k = kernel.TangentKernel(0.8, 0)
-    k = kernel.RQKernel(5)
-    # k = kernel.MultiQuadratic(0.7)
-    # lambda x, x_prime: -k(x, x_prime)+k(np.array([0, 0]), np.array([[10, 10]]))
-    checker = DiffCo(obstacles, kernel_func=k, beta=20)
-    vis(checker, 200, seed=1917)
 
 
 def test_diffco_beta():

@@ -11,6 +11,7 @@ from typing import List, Tuple, Dict, Optional
 from dataclasses import dataclass
 import os
 from collections import defaultdict
+import time
 
 import torch
 
@@ -225,12 +226,12 @@ class URDFRobotCollisionManager(trimesh.collision.CollisionManager):
           All contacts detected
         """
         cdata = fcl.CollisionData()
-        if return_names or return_data or self._allowed_internal_collisions is not None:
+        if return_names or return_data or self._allowed_internal_collisions is not None: 
             cdata = fcl.CollisionData(
                 request=fcl.CollisionRequest(num_max_contacts=100000, enable_contact=True)
             )
 
-        self._manager.collide(cdata, self._collision_callback)
+        self._manager.collide(cdata, defaultCollisionCallback) #, self._collision_callback)
                 
         result = cdata.result.is_collision
 
@@ -393,7 +394,7 @@ class URDFRobot(RobotInterfaceBase):
 
             # Joint properties
             body.dof_idx = None
-            if rigid_body_params["joint_type"] != "fixed":
+            if body.joint_type != "fixed":
                 if body.joint_mimic is None:
                     body.dof_idx = self._n_dofs
                     self._n_dofs += 1
@@ -419,15 +420,16 @@ class URDFRobot(RobotInterfaceBase):
         # Calculate joint limits
         self.joint_limits = torch.zeros((self._n_dofs, 2), device=self._device)
         for i, body_idx in enumerate(self._controlled_joints):
-            joint = self.urdf.joint_map[self._bodies[body_idx].joint_name]
-            if joint.type == "revolute" or joint.type == "prismatic":
-                if joint.limit is not None:
-                    self.joint_limits[i, 0] = joint.limit.lower
-                    self.joint_limits[i, 1] = joint.limit.upper
+            # joint = self.urdf.joint_map[self._bodies[body_idx].joint_name]
+            body = self._bodies[body_idx]
+            if body.joint_type == "revolute" or body.joint_type == "prismatic":
+                if body.joint_limits is not None:
+                    self.joint_limits[i, 0] = body.joint_limits['lower']
+                    self.joint_limits[i, 1] = body.joint_limits['upper']
                 else:
                     self.joint_limits[i, 0] = -np.pi
                     self.joint_limits[i, 1] = np.pi
-            elif joint.type == "continuous":
+            elif body.joint_type == "continuous":
                 self.joint_limits[i, 0] = -2*np.pi
                 self.joint_limits[i, 1] = 2*np.pi
         
@@ -446,7 +448,9 @@ class URDFRobot(RobotInterfaceBase):
         return torch.rand(num_cfgs, self._n_dofs, device=self._device) * (self.joint_limits[:, 1] - self.joint_limits[:, 0]) + self.joint_limits[:, 0]
     
     def collision(self, q, other=None, show=False):
+        # fk_start_time = time.time()
         fk = self.compute_forward_kinematics_all_links(q, return_collision=True)
+        # print(f'Forward kinematics time for {q.shape[0]} configs: {time.time() - fk_start_time:.6f} seconds')
         batch_size = q.shape[0]
         collision_labels = torch.zeros(batch_size, dtype=torch.bool, device=self._device)
         for i in range(batch_size):
@@ -549,9 +553,9 @@ class URDFRobot(RobotInterfaceBase):
         return pose_dict
 
     def find_joint_of_body(self, body_name):
-        for jname, joint in self.urdf.joint_map.items():
+        for joint in self.urdf.robot.joints:
             if joint.child == body_name:
-                return jname
+                return joint.name
         return None
 
     def get_name_of_parent_body(self, link_name):
@@ -595,7 +599,7 @@ class URDFRobot(RobotInterfaceBase):
                     "lower": joint.limit.lower,
                     "upper": joint.limit.upper,
                     "velocity": joint.limit.velocity,
-                }
+                } if joint.limit is not None else None
                 try:
                     joint_damping = joint.dynamics.damping
                     if isinstance(joint_damping, str):
@@ -823,6 +827,14 @@ class FrankaPanda(URDFRobot):
         self.name = "urdf_franka_panda"
         super().__init__(
             self.urdf_path, self.name, **kwargs)
+        self.collision_manager._allowed_internal_collisions['panda_link5', 'panda_hand'] = 'never'
+        self.collision_manager._allowed_internal_collisions['panda_hand', 'panda_link5'] = 'never'
+        self.collision_manager._allowed_internal_collisions['panda_link5', 'panda_link7'] = 'default'
+        self.collision_manager._allowed_internal_collisions['panda_link7', 'panda_link5'] = 'default'
+        self.collision_manager._allowed_internal_collisions['panda_leftfinger', 'panda_rightfinger'] = 'default'
+        self.collision_manager._allowed_internal_collisions['panda_rightfinger', 'panda_leftfinger'] = 'default'
+        self.collision_manager._allowed_internal_collisions['panda_link2', 'panda_link6'] = 'never'
+        self.collision_manager._allowed_internal_collisions['panda_link6', 'panda_link2'] = 'never'
 
 
 class TwoLinkRobot(URDFRobot):
