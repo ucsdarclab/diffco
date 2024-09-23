@@ -29,7 +29,7 @@ class Perceptron():
 
 
 class DiffCo(Perceptron):
-    def __init__(self, kernel_func='rq', gamma=1, beta=1, transform=None):
+    def __init__(self, kernel_func='rq', gamma=1, beta=1, transform=None, max_bs=None):
         super().__init__()
         # self.gt_checker = gt_checker if gt_checker is not None else CollisionChecker(self.obstacles)
         self.train_method = None
@@ -44,13 +44,32 @@ class DiffCo(Perceptron):
         self.y = None
         self.distance = None
         self.kernel_matrix = None
+        self.rbf_nodes = None
+        self.max_bs = max_bs
 
-    def train(self, X, y, max_iteration=1000, method='original', distance=None, keep_all=False, verbose=False):
+    def train(
+            self, 
+            X, 
+            y, 
+            update=False,
+            exist_mask=None,
+            max_iteration=1000, 
+            method='original', 
+            distance=None, 
+            keep_all=False, 
+            verbose=False):
+        device = X.device
+        if device.type == 'cuda':
+            self._cuda = True
+
         self.train_method = method
         self.distance = distance.reshape(-1) if distance is not None else None
         time_start = time()
         if method == 'original':
-            self.train_perceptron(X, y, max_iteration, verbose=verbose)
+            self.train_perceptron(
+                X, y, update=update, exist_mask=exist_mask, 
+                max_iteration=max_iteration, verbose=verbose
+            )
         elif method == 'sgd':
             self.train_sgd(max_iteration)
         elif method == 'svm':
@@ -72,10 +91,26 @@ class DiffCo(Perceptron):
         self.y = self.y[mask]
         self.distance = self.distance[mask] if self.distance is not None else None
         self.gains = self.gains[mask]
-        self.kernel_matrix = self.kernel_matrix[np.ix_(mask, mask)]
+        chosen_idx = torch.where(mask)[0]
+        if len(chosen_idx) > 10000:
+            kernel_matrix_cpu = self.kernel_matrix.cpu()
+            chosen_idx = chosen_idx.cpu()
+            del self.kernel_matrix
+            self.kernel_matrix = kernel_matrix_cpu[chosen_idx[:, None], chosen_idx[None, :]].to(self.support_points.device)
+        else:
+            self.kernel_matrix = self.kernel_matrix[chosen_idx[:, None], chosen_idx[None, :]]
 
-    def train_perceptron(self, X, y, max_iteration=1000, verbose=False):
-        self.initialize(X, y)
+    def train_perceptron(
+            self, 
+            X, y, 
+            update=False,
+            exist_mask=None,
+            max_iteration=1000, 
+            verbose=False):
+        if update:
+            self.jump_start_initialize(X, y, exist_mask)
+        else:
+            self.initialize(X, y)
         
         if verbose:
             print('DiffCo training...')
@@ -96,7 +131,7 @@ class DiffCo(Perceptron):
                 # self.hypothesis[min_margin_idx] = self.gains @ self.kernel_matrix[:, min_margin_idx]
                 continue
             
-            modified_margin = self.y*(self.hypothesis - self.gains * np.diag(self.kernel_matrix)) * (self.gains != 0 )  # 
+            modified_margin = self.y*(self.hypothesis - self.gains * torch.diag(self.kernel_matrix)) * (self.gains != 0 )  # 
             max_margin, max_i = torch.max(modified_margin, 0)
             if max_margin > 0 and torch.sum(self.gains != 0) > 1:
                 self.hypothesis -= self.gains[max_i]*self.kernel_matrix[max_i]
@@ -113,13 +148,77 @@ class DiffCo(Perceptron):
         self.support_points = X.clone()
         self.support_transformed = self.support_points if self.transform is None \
             else self.transform(self.support_points)
+        
+        if len(X) <= 10000:
+            # move to cpu for faster training
+            self.support_points = self.support_points.cpu()
+            self.support_transformed = self.support_transformed.cpu()
+            y = y.cpu()
+            X = X.cpu()
+
         self.y = y.reshape(-1).clone()
         assert len(y) == len(X)
         num_init_points = len(X)
-        self.gains = torch.zeros(num_init_points, dtype=X.dtype)
-        self.kernel_matrix = torch.zeros((num_init_points, num_init_points), dtype=X.dtype)
-        self.hypothesis = torch.zeros(num_init_points, dtype=X.dtype)
-        self.max_n_support = 200  # TODO
+        self.gains = torch.zeros(num_init_points, dtype=X.dtype, device=X.device)
+        self.kernel_matrix = torch.zeros((num_init_points, num_init_points), dtype=X.dtype, device=X.device)
+        self.hypothesis = torch.zeros(num_init_points, dtype=X.dtype, device=X.device)
+
+    def jump_start_initialize(self, X, y, exist_mask):
+        num_init_points = len(X)
+
+        if num_init_points <= 10000:
+            # move to cpu for faster training
+            device = torch.device('cpu')
+        else:
+            device = X.device
+
+        novel_points = X[~exist_mask]
+        assert num_init_points - len(novel_points) == len(self.support_points)
+        # assert torch.allclose(X[exist_mask], self.support_points)
+
+        novel_hypothesis = self.score_original(novel_points).to(device)
+        hypothesis = torch.zeros(num_init_points, dtype=X.dtype, device=device)
+        hypothesis[exist_mask] = self.hypothesis.to(device)
+        hypothesis[~exist_mask] = novel_hypothesis
+        # assert torch.allclose(hypothesis, self.score_original(X), atol=1e-5), f"diff: {torch.abs(hypothesis - self.score_original(X)).max()}"
+        self.hypothesis = hypothesis.to(device)
+        
+        # This may need to happen in the original device
+        transformed_novel_points = novel_points if self.transform is None else self.transform(novel_points).to(device)
+        
+        kernel_matrix = torch.zeros((num_init_points, num_init_points), dtype=X.dtype, device=device)
+        exist_idx = torch.where(exist_mask)[0].to(device)
+        novel_idx = torch.where(~exist_mask)[0].to(device)
+        kernel_matrix[exist_idx[:, None], exist_idx[None, :]] = self.kernel_matrix.to(device)
+        # kernel_matrix[novel_idx[:, None], novel_idx[None, :]] = self.kernel_func(transformed_novel_points, transformed_novel_points)
+        kernel_matrix[exist_idx[:, None], novel_idx[None, :]] = self.kernel_func(self.support_transformed.to(device), transformed_novel_points)
+        kernel_matrix[novel_idx[:, None], exist_idx[None, :]] = kernel_matrix[exist_idx[:, None], novel_idx[None, :]].T
+        self.kernel_matrix = kernel_matrix.to(device)
+
+        self.support_points = X.clone()
+        support_transformed = self.support_transformed.new_zeros((num_init_points,) + transformed_novel_points.shape[1:]).to(device)
+        support_transformed[exist_mask] = self.support_transformed.to(device)
+        support_transformed[~exist_mask] = transformed_novel_points
+        self.support_transformed = support_transformed.to(device)
+        # self.support_transformed = self.support_points if self.transform is None \
+        #     else self.transform(self.support_points)
+        
+        self.support_points = self.support_points.to(device)
+        y = y.to(device)
+        X = X.to(device)
+        self.gains = self.gains.to(device)
+
+        self.y = y.reshape(-1).clone()
+        # assert len(y) == len(X)
+        
+        gains = torch.zeros(num_init_points, dtype=X.dtype, device=device)
+        gains[exist_mask] = self.gains.to(device)
+        self.gains = gains
+
+        torch.cuda.empty_cache()
+
+        # check_score = self.score_original(X)
+        # assert torch.allclose(check_score, hypothesis, atol=1e-5), f"diff: {torch.abs(check_score - hypothesis).max()}"
         
     def train_sgd(self, max_iteration=1000):
         self.y = np.zeros(len(self.support_points))
@@ -177,18 +276,30 @@ class DiffCo(Perceptron):
         if self.transform is not None:
             self.support_transformed = self.support_transformed.cuda()
         self.rbf_nodes = self.rbf_nodes.cuda()
+        self.gains = self.gains.cuda()
         self._cuda = True
+    
+    def to(self, device: torch.device):
+        self.support_points = self.support_points.to(device)
+        if self.transform is not None:
+            self.support_transformed = self.support_transformed.to(device)
+        if self.rbf_nodes is not None:
+            self.rbf_nodes = self.rbf_nodes.to(device)
+        self._cuda = device.type == 'cuda'
     
     @property
     def device(self):
         return self.support_points.device
     
-    def poly_score(self, point):
-        if point.ndim == 1:
-            point = point[np.newaxis, :]
-        point = point.to(device=self.rbf_nodes.device, dtype=self.rbf_nodes.dtype)
-        if self.transform is not None:
-            point = self.transform(point)
+    def poly_score(self, point=None, transformed_point=None):
+        if transformed_point is None:
+            if point.ndim == 1:
+                point = point.unsqueeze(0)
+            point = point.to(device=self.rbf_nodes.device, dtype=self.rbf_nodes.dtype)
+            if self.transform is not None:
+                point = self.transform(point)
+        else:
+            point = transformed_point
         supports = self.support_transformed
         return torch.matmul(self.rbf_kernel(point, supports), self.rbf_nodes.unsqueeze(1))
     
@@ -211,6 +322,8 @@ class DiffCo(Perceptron):
         self.poly_nodes = torch.solve(
             torch.cat([y, torch.zeros(X.shape[1]+1)], dim=0).reshape(-1, 1),
             L).solution.reshape(-1)
+        if self._cuda:
+            self.cuda()
     
     def full_poly_score(self, point):
         if point.ndim == 1:

@@ -10,6 +10,7 @@ class TestForwardKinematicsDiffCo(unittest.TestCase):
     def setUp(self):
         # Initialize any necessary objects or variables
         pass
+        
 
     def tearDown(self):
         # Clean up any resources used in the test
@@ -29,7 +30,7 @@ class TestForwardKinematicsDiffCo(unittest.TestCase):
         )
         panda_urdf_robot = dc.FrankaPanda(
             simple_collision=False,
-            load_gripper=False, 
+            load_gripper=True, 
             base_transform=torch.eye(4),
             device="cpu", load_visual_meshes=False)
         fkdc = dc.ForwardKinematicsDiffCo(
@@ -80,12 +81,12 @@ class TestForwardKinematicsDiffCo(unittest.TestCase):
         gt_collisions = checker.gt_check_func(q)
         gt_time = time.time() - gt_start_time
         
-        print(f'GT collision check took {gt_time:.4f} seconds on {num_configs} configs.')
-        print(f'DiffCo collision check took {dc_time:.4f} seconds on {num_configs} configs.')
+        print(f'GT collision check took {gt_time:.6f} seconds on {num_configs} configs.')
+        print(f'DiffCo collision check took {dc_time:.6f} seconds on {num_configs} configs.')
         # self.assertLess(dc_time, gt_time / 20)
 
         # Compare the speed on a single configuration
-        num_configs = 10
+        num_configs = 50
 
         dc_start_time = time.time()
         dc_collisions = checker.collision(q[:num_configs])
@@ -94,9 +95,23 @@ class TestForwardKinematicsDiffCo(unittest.TestCase):
         gt_collisions = checker.gt_check_func(q[:num_configs])
         gt_time = time.time() - gt_start_time
         
-        print(f'GT collision check took {gt_time:.4f} seconds on {num_configs} configs.')
-        print(f'DiffCo collision check took {dc_time:.4f} seconds on {num_configs} configs.')
+        print(f'GT collision check took {gt_time:.6f} seconds on {num_configs} configs.')
+        print(f'DiffCo collision check took {dc_time:.6f} seconds on {num_configs} configs.')
         self.assertLessEqual(dc_time, gt_time+1e-4)
+    
+
+    def visual_test(self, checker: dc.ForwardKinematicsDiffCo, num_cfgs: int=10):
+        urdf_robot = checker.robot
+
+        cfgs = urdf_robot.rand_configs(num_cfgs)
+
+        collision_predictions = checker.collision_score(cfgs)
+
+        assert isinstance(checker.robot, dc.RobotInterfaceBase)
+
+        for i in range(num_cfgs):
+            print(f'Collision prediction for config {i}: {collision_predictions[i]}')
+            checker.gt_check_func(cfgs[i:i+1], show=True)
 
     
     def test_active_learning_twolink(self):
@@ -151,11 +166,15 @@ class TestForwardKinematicsDiffCo(unittest.TestCase):
         )
         acc, tpr, tnr = fkdc.fit(num_samples=3000, verbose=True)
 
-        shape_env.update_transform('box1', tf.translation_matrix([0.4, 0.4, 0.4]))
-        shape_env.update_transform('sphere1', tf.translation_matrix([0.4, 0, 0.4]))
-        shape_env.update_transform('cylinder1', tf.translation_matrix([0, -0.4, 0.4]))
-        shape_env.update_transform('capsule1', tf.translation_matrix([0.4, 0.4, 0]))
-        shape_env.update_transform('mesh1', tf.translation_matrix([0, 0.4, 0]))
+        new_poses = {
+            'box1': tf.translation_matrix([0.4, 0.4, 0.4]),
+            'sphere1': tf.translation_matrix([0.4, 0, 0.4]),
+            'cylinder1': tf.translation_matrix([0, -0.4, 0.4]),
+            'capsule1': tf.translation_matrix([0.4, 0.4, 0]),
+            'mesh1': tf.translation_matrix([0, 0.4, 0]),
+        }
+        for shape_name, new_pose in new_poses.items():
+            shape_env.update_transform(shape_name, new_pose)
         print('Shape env updated.\n'+ '-'*50)
         print('Verifying before DiffCo update:')
         acc, tpr, tnr = fkdc.verify(verbose=True)
@@ -168,6 +187,48 @@ class TestForwardKinematicsDiffCo(unittest.TestCase):
         acc, tpr, tnr = fkdc.verify(verbose=True)
         self.assertGreaterEqual(tpr, 0.9)
         print('-'*50)
+    
+
+    def test_dual_panda_shoulder(self):
+        print('-'*50, '\nTesting ForwardKinematicsDiffCo with DualPandaShoulder robot.')
+        shape_env = dc.ShapeEnv(
+            shapes={
+                'box1': {'type': 'Box', 'params': {'extents': [0.3, 0.3, 0.2]}, 'transform': tf.translation_matrix([0, 0.1, 0.1])},
+                # 'sphere1': {'type': 'Sphere', 'params': {'radius': 0.1}, 'transform': tf.translation_matrix([0.5, 0, 0])},
+                # 'cylinder1': {'type': 'Cylinder', 'params': {'radius': 0.1, 'height': 0.2}, 'transform': tf.translation_matrix([0, -0.5, 0.5])},
+                # 'capsule1': {'type': 'Capsule', 'params': {'radius': 0.1, 'height': 0.2}, 'transform': tf.translation_matrix([0.5, 0.5, 0])},
+                'mesh1': {'type': 'Mesh', 'params': {'file_obj': '../../assets/object_meshes/teapot.stl', 'scale': 1e-1}, 'transform': tf.translation_matrix([0, -0.5, 0])},
+            }
+        )
+        transform1 = tf.translation_matrix([0.1, 0.0, 0.8])
+        transform1[:3, :3] = tf.euler_matrix(0, np.pi/2, 0)[:3, :3]
+        panda1 = dc.FrankaPanda(
+            name="panda1",
+            simple_collision=False,
+            load_gripper=True, 
+            base_transform=torch.tensor(transform1, dtype=torch.float32),
+            device="cpu", load_visual_meshes=False)
+        transform2 = tf.translation_matrix([-0.1, 0.0, 0.8])
+        transform2[:3, :3] = tf.euler_matrix(0, -np.pi/2, 0)[:3, :3]
+        panda2 = dc.FrankaPanda(
+            name="panda2",
+            simple_collision=False,
+            load_gripper=True, 
+            base_transform=torch.tensor(transform2, dtype=torch.float32),
+            device="cpu", load_visual_meshes=False)
+        dual_panda_shoulder = dc.MultiURDFRobot(
+            urdf_robots=[panda1, panda2],
+            device="cpu"
+        )
+        fkdc = dc.ForwardKinematicsDiffCo(
+            robot=dual_panda_shoulder,
+            environment=shape_env,
+        )
+        acc, tpr, tnr = fkdc.fit(num_samples=10000, verbose=True, sample_transform='fkine') # 'fkine')
+
+        self.visual_test(fkdc, num_cfgs=50)
+
+        self.speed_test(fkdc)
 
 
 if __name__ == '__main__':

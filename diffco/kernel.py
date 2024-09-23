@@ -19,8 +19,10 @@ class RQKernel(KernelFunc):
             xs = xs[[None] * (x_primes.ndim - xs.ndim)]
         xs = xs.reshape(xs.shape[0], -1)
         x_primes = x_primes.reshape(x_primes.shape[0], -1)
-        pair_diff = x_primes[None, :] - xs[:, None]
-        kvalues = (1/(1+self.gamma/self.p*torch.sum(pair_diff**2, dim=2))**self.p)
+        # pair_diff = x_primes[None, :] - xs[:, None]
+        # kvalues = (1/(1+self.gamma/self.p*torch.sum(pair_diff**2, dim=2))**self.p)
+        pair_dist = torch.cdist(xs, x_primes).square()
+        kvalues = (1/(1+self.gamma/self.p*pair_dist)**self.p)
         if kvalues.shape[0] == 1:
             kvalues = kvalues.squeeze_(0)
 
@@ -66,12 +68,12 @@ class Polyharmonic(KernelFunc):
         else:
             def _odd_func(r):
                 return r**k
-            self._func = _odd_func
+            self._func = _odd_func if k > 1 else lambda r: r
     
     def __call__(self, xs, x_primes):
         # TODO: take care of shape outside of this function
         if xs.ndim < x_primes.ndim:
-            xs = xs[[None] * (x_primes.ndim - xs.ndim)]
+            xs = xs.view(tuple([None] * (x_primes.ndim - xs.ndim)) + xs.shape)
         r = torch.cdist(xs.view(len(xs), -1), x_primes.view(len(x_primes), -1))
         kvalues = self._func(r) / self.epsilon
         return kvalues
