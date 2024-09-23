@@ -173,3 +173,4 @@ docker/
 
 .devcontainer
 notebook_tutorials/testing_random_stuff.ipynb
+examples/private_tests/

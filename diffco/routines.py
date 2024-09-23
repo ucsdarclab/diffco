@@ -3,7 +3,9 @@ from typing import Callable, Tuple, Union
 import torch
 import pickle
 import numpy as np
-from . import CollisionChecker, DiffCo, MultiDiffCo, kernel
+from .collision_checkers import CollisionChecker
+from .kernel_perceptrons import DiffCo, MultiDiffCo
+from . import kernel
 from .model import Model
 from .utils import euler2mat
 
@@ -254,7 +256,7 @@ def test_checker(
         dist_est (Callable): The distance estimator function.
         test_data (torch.Tensor): The test set data.
         test_labels (torch.Tensor): The test set labels.
-        safety_margin (int): Amount to offset test predictions by when running
+        safety_margin (float): Amount to offset test predictions by when running
             the scoring method. Defaults to 0.
     """
     # Check DiffCo test ACC

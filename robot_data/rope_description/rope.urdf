@@ -1,0 +1,46 @@
+<robot name="rope_robot">
+  <!-- Material Definitions -->
+  <material name="link_material">
+    <color rgba="0.6 0.6 0.6 1"/>
+  </material>
+
+  <!-- Link Definitions -->
+  <!-- Each link is a capsule with a length of 5 cm and a small radius, assumed here as 1 cm -->
+  <!-- The mass of each link is 0.025 kg -->
+  <!-- Assuming uniform density and simple geometry for the inertia calculation -->
+  <!-- Note: Inertia values are placeholders and should be calculated based on the actual geometry and mass distribution -->
+  <link name="link1">
+    <inertial>
+      <origin xyz="0 0 0.025" rpy="0 0 0"/>
+      <mass value="0.025"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0.025" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.05" radius="0.01"/>
+      </geometry>
+      <material name="link_material"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.025" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.05" radius="0.01"/>
+      </geometry>
+    </collision>
+  </link>
+
+
+
+<!-- Joint Definitions -->
+<!-- Joints are continuous, allowing for full rotation -->
+<!-- The axis of rotation is set along the Y-axis for this example -->
+<joint name="joint1" type="continuous">
+    <origin xyz="0 0 0.05" rpy="0 0 0"/>
+    <parent link="link1"/>
+    <child link="link2"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+
+</robot>

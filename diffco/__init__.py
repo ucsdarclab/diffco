@@ -1,5 +1,4 @@
-from .DiffCo import *
-from .MultiDiffCo import *
-from .FCLChecker import FCLChecker, Simple1DDynamicChecker
 from . import kernel, model, utils, optim, routines
-from .DiffCoBeta import *
+from .kernel_perceptrons import DiffCo, MultiDiffCo, DiffCoBeta
+from .collision_checkers import CollisionChecker, RBFDiffCo, ForwardKinematicsDiffCo, HybridForwardKinematicsDiffCo
+from .collision_interfaces import *

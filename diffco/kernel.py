@@ -10,16 +10,19 @@ class KernelFunc:
 
 
 class RQKernel(KernelFunc):
-    def __init__(self, gamma, p=2):
+    def __init__(self, gamma: float, p: int=2):
         self.gamma = gamma
         self.p = p
 
     def __call__(self, xs, x_primes):
-        if xs.ndim == 1:
-            xs = xs[np.newaxis, :]
-        xs = xs[:, np.newaxis] # change to [1, len(x), channel]
-        pair_diff = x_primes[np.newaxis, :] - xs
-        kvalues = (1/(1+self.gamma/self.p*torch.sum(pair_diff**2, dim=2))**self.p)
+        if xs.ndim < x_primes.ndim:
+            xs = xs[[None] * (x_primes.ndim - xs.ndim)]
+        xs = xs.reshape(xs.shape[0], -1)
+        x_primes = x_primes.reshape(x_primes.shape[0], -1)
+        # pair_diff = x_primes[None, :] - xs[:, None]
+        # kvalues = (1/(1+self.gamma/self.p*torch.sum(pair_diff**2, dim=2))**self.p)
+        pair_dist = torch.cdist(xs, x_primes).square()
+        kvalues = (1/(1+self.gamma/self.p*pair_dist)**self.p)
         if kvalues.shape[0] == 1:
             kvalues = kvalues.squeeze_(0)
 
@@ -65,15 +68,14 @@ class Polyharmonic(KernelFunc):
         else:
             def _odd_func(r):
                 return r**k
-            self._func = _odd_func
+            self._func = _odd_func if k > 1 else lambda r: r
     
     def __call__(self, xs, x_primes):
-        if xs.ndim == 1:
-            xs = xs[np.newaxis, :]
-        r = torch.cdist(xs, x_primes)
+        # TODO: take care of shape outside of this function
+        if xs.ndim < x_primes.ndim:
+            xs = xs.view(tuple([None] * (x_primes.ndim - xs.ndim)) + xs.shape)
+        r = torch.cdist(xs.view(len(xs), -1), x_primes.view(len(x_primes), -1))
         kvalues = self._func(r) / self.epsilon
-        if kvalues.shape[1] == 1:
-            kvalues = kvalues.squeeze(1)
         return kvalues
         
 
@@ -128,6 +130,7 @@ class TangentKernel(KernelFunc):
 
 class FKKernel(KernelFunc):
     def __init__(self, fkine, rq_kernel):
+        raise DeprecationWarning('This class is deprecated. Specify the transform in kernel_perceptrons.DiffCo directly.')
         self.fkine = fkine
         self.rq_kernel = rq_kernel
     
