@@ -707,9 +707,9 @@ class MultiURDFRobot(RobotInterfaceBase):
     '''
     def __init__(
             self, 
-            urdf_robots: List[URDFRobot]=None,
-            urdf_paths: List[str]=None, 
-            names: List[str]=None,
+            urdf_robots: Optional[List[URDFRobot]]=None,
+            urdf_paths: Optional[List[str]]=None, 
+            names: Optional[List[str]]=None,
             base_transforms: List[torch.Tensor]=None,
             name: str=None,
             device="cpu", 
@@ -717,6 +717,7 @@ class MultiURDFRobot(RobotInterfaceBase):
             load_visual_meshes=False):
         if urdf_robots is not None:
             self.urdf_robots = urdf_robots
+            assert len(set([robot.name for robot in self.urdf_robots])) == len(self.urdf_robots), "Robot names must be unique"
             self.name = '_'.join([robot.name for robot in self.urdf_robots]) if name is None else name
             self._device = self.urdf_robots[0]._device
         else:
@@ -732,6 +733,7 @@ class MultiURDFRobot(RobotInterfaceBase):
             self._device = device
         
         self.inter_robot_acm = None
+        self._bodies = [[body for body in robot._bodies] for robot in self.urdf_robots]
     
     def rand_configs(self, num_cfgs):
         return torch.cat([robot.rand_configs(num_cfgs) for robot in self.urdf_robots], dim=1)
@@ -762,22 +764,89 @@ class MultiURDFRobot(RobotInterfaceBase):
                     if collision_labels[i]:
                         break
             
+            if not collision_labels[i]:
+                for j, urdf_robot in enumerate(self.urdf_robots):
+                    robot_self_collision = urdf_robot.collision_manager.in_collision_internal(return_data=False)[0]
+                    if robot_self_collision:
+                        collision_labels[i] = True
+                        break
+            
             if not collision_labels[i]:    
+                inter_robot_collision = False
                 for j, urdf_robot1 in enumerate(self.urdf_robots):
                     for k in range(j+1, len(self.urdf_robots)):
                         urdf_robot2 = self.urdf_robots[k]
-                        collision_labels[i] = collision_labels[i] or  urdf_robot1.collision_manager.in_collision_other(urdf_robot2.collision_manager, acm=self.inter_robot_acm)[0] \
-                            or urdf_robot1.collision_manager.in_collision_internal(return_data=True)[0] or urdf_robot2.collision_manager.in_collision_internal(return_data=True)[0]
-                        if collision_labels[i]:
+                        inter_robot_collision = collision_labels[i] or urdf_robot1.collision_manager.in_collision_other(urdf_robot2.collision_manager, acm=self.inter_robot_acm)[0]
+                        if inter_robot_collision:
                             break
+                    if inter_robot_collision:
+                        break
+                collision_labels[i] = inter_robot_collision
             
             if show:
                 print(f"in collision?: {collision_labels[i]}")
                 q_i_split = [q_per_robot[i] for q_per_robot in q_split]
-                # print(f"contact data: {[c.names for c in contacts_data]}")
+                colliding_links = dict()
+                if other is not None:
+                    for urdf_robot in self.urdf_robots:
+                        ret = urdf_robot.collision_manager.in_collision_other(other.collision_manager, return_data=True)
+                        if ret[0]:
+                            contacts_data = ret[1]
+                            for contact in contacts_data:
+                                names = tuple(contact.names)
+                                parent_link1 = urdf_robot.collision_manager.geom_name_to_parent_link.get(names[0], None)
+                                other_geom_name_to_parent_link = getattr(other.collision_manager, 'geom_name_to_parent_link', None)
+                                if other_geom_name_to_parent_link is not None:
+                                    parent_link2 = other_geom_name_to_parent_link.get(names[1], None)
+                                else:
+                                    parent_link2 = names[1]
+                                collision_status = 'Not allowed'
+                                link_pair = (f"{urdf_robot.name}.{parent_link1}", f"{other.name}.{parent_link2}")
+                                if link_pair not in colliding_links:
+                                    colliding_links[link_pair] = collision_status
+                                # print(f"{collision_status}: {link_pair[0]}, {link_pair[1]}")
+                    for urdf_robot in self.urdf_robots:
+                        ret = urdf_robot.collision_manager.in_collision_internal(return_data=True)
+                        if ret[0]:
+                            contacts_data = ret[1]
+                            for contact in contacts_data:
+                                names = tuple(contact.names)
+                                parent_link1 = urdf_robot.collision_manager.geom_name_to_parent_link.get(names[0], None)
+                                parent_link2 = urdf_robot.collision_manager.geom_name_to_parent_link.get(names[1], None)
+                                collision_status = urdf_robot.collision_manager._allowed_internal_collisions.get((parent_link1, parent_link2), 'Not allowed')
+                                link_pair = (f"{urdf_robot.name}.{parent_link1}", f"{urdf_robot.name}.{parent_link2}")
+                                if link_pair not in colliding_links:
+                                    colliding_links[link_pair] = collision_status
+                                # print(f"{collision_status}: {link_pair[0]}, {link_pair[1]}")
+
+                for j, urdf_robot1 in enumerate(self.urdf_robots):
+                    for k in range(j+1, len(self.urdf_robots)):
+                        urdf_robot2 = self.urdf_robots[k]
+                        ret = urdf_robot1.collision_manager.in_collision_other(urdf_robot2.collision_manager, return_data=True)
+                        if ret[0]:
+                            contacts_data = ret[1]
+                            for contact in contacts_data:
+                                names = tuple(contact.names)
+                                parent_link1 = urdf_robot1.collision_manager.geom_name_to_parent_link.get(names[0], None)
+                                parent_link2 = urdf_robot2.collision_manager.geom_name_to_parent_link.get(names[1], None)
+                                # collision_status = urdf_robot1.collision_manager._allowed_internal_collisions.get((parent_link1, parent_link2), 'Not allowed')
+                                collision_status = 'Not allowed'
+                                link_pair = (f"{urdf_robot1.name}.{parent_link1}", f"{urdf_robot2.name}.{parent_link2}")
+                                if link_pair not in colliding_links:
+                                    colliding_links[link_pair] = collision_status
+                                # print(f"{collision_status}: {link_pair[0]}, {link_pair[1]}")
+                for link_pair, collision_status in colliding_links.items():
+                    print(f"{collision_status}: {link_pair[0]}, {link_pair[1]}")
                 for urdf_robot, q_i_split_i in zip(self.urdf_robots, q_i_split):
                     urdf_robot.urdf.update_cfg(q_i_split_i.numpy())
                 scene = append_scenes([urdf_robot.urdf.collision_scene if urdf_robot.urdf.scene is None else urdf_robot.urdf.scene for urdf_robot in self.urdf_robots])
+                if other is not None:
+                    if isinstance(other, ShapeEnv):
+                        scene += other.scene
+                    elif isinstance(other, URDFRobot):
+                        scene += other.urdf.collision_scene if other.urdf.scene is None else other.urdf.scene
+                    else:
+                        raise NotImplementedError("other must be either a ShapeEnv or URDFRobot object to visualize")
                 points = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1],
                                    [0, 1, 1], [1, 0, 1], [1, 1, 0], [1, 1, 1]]) - [0.5, 0.5, 0]
                 scene.camera_transform = scene.camera.look_at(points)
@@ -824,7 +893,10 @@ class FrankaPanda(URDFRobot):
             else:
                 rel_urdf_path = "panda_description/urdf/panda.urdf" if load_gripper else "panda_description/urdf/panda_no_gripper.urdf"
         self.urdf_path = os.path.join(robot_description_folder, rel_urdf_path)
-        self.name = "urdf_franka_panda"
+        if 'name' in kwargs:
+            self.name = kwargs.pop('name')
+        else:
+            self.name = "urdf_franka_panda"
         super().__init__(
             self.urdf_path, self.name, **kwargs)
         self.collision_manager._allowed_internal_collisions['panda_link5', 'panda_hand'] = 'never'
@@ -835,6 +907,9 @@ class FrankaPanda(URDFRobot):
         self.collision_manager._allowed_internal_collisions['panda_rightfinger', 'panda_leftfinger'] = 'default'
         self.collision_manager._allowed_internal_collisions['panda_link2', 'panda_link6'] = 'never'
         self.collision_manager._allowed_internal_collisions['panda_link6', 'panda_link2'] = 'never'
+        self.collision_manager._allowed_internal_collisions['panda_link1', 'panda_link3'] = 'never'
+        self.collision_manager._allowed_internal_collisions['panda_link3', 'panda_link1'] = 'never'
+
 
 
 class TwoLinkRobot(URDFRobot):

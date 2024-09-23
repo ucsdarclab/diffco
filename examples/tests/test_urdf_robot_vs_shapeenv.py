@@ -31,35 +31,55 @@ if __name__ == "__main__":
         }
     )
     
-    two_link_robot = TwoLinkRobot()
-    test_urdf_vs_shapeenv(two_link_robot, shape_env, show=True)
+    # two_link_robot = TwoLinkRobot()
+    # test_urdf_vs_shapeenv(two_link_robot, shape_env, show=True)
 
 
-    panda_urdf_robot = FrankaPanda(
-        load_gripper=True, 
-        base_transform=torch.eye(4),
-        device="cpu", load_visual_meshes=True)
-    test_urdf_vs_shapeenv(panda_urdf_robot, shape_env, show=True)
+    # panda_urdf_robot = FrankaPanda(
+    #     load_gripper=True, 
+    #     base_transform=torch.eye(4),
+    #     device="cpu", load_visual_meshes=True)
+    # test_urdf_vs_shapeenv(panda_urdf_robot, shape_env, show=True)
     
-    base_transform = torch.tensor(tf.translation_matrix([-0.5, 0, 0.5]), dtype=torch.float32)
-    hand_urdf_robot = URDFRobot(
-        urdf_path=os.path.join(
-            robot_description_folder, 
-            "allegro/urdf/allegro_hand_description_left.urdf"),
-        name="allegro",
-        base_transform=base_transform,
-        device="cpu",
-        load_visual_meshes=True
-    )
-    test_urdf_vs_shapeenv(hand_urdf_robot, shape_env, show=False)
+    # base_transform = torch.tensor(tf.translation_matrix([-0.5, 0, 0.5]), dtype=torch.float32)
+    # hand_urdf_robot = URDFRobot(
+    #     urdf_path=os.path.join(
+    #         robot_description_folder, 
+    #         "allegro/urdf/allegro_hand_description_left.urdf"),
+    #     name="allegro",
+    #     base_transform=base_transform,
+    #     device="cpu",
+    #     load_visual_meshes=True
+    # )
+    # test_urdf_vs_shapeenv(hand_urdf_robot, shape_env, show=False)
 
-    multi_urdf_robot = MultiURDFRobot(
-        urdf_robots=[
-            panda_urdf_robot,
-            hand_urdf_robot
-        ],
+    # multi_urdf_robot = MultiURDFRobot(
+    #     urdf_robots=[
+    #         panda_urdf_robot,
+    #         hand_urdf_robot
+    #     ],
+    #     device="cpu"
+    # )
+    # test_urdf_vs_shapeenv(multi_urdf_robot, shape_env, show=False)
+
+    transform1 = tf.translation_matrix([0.1, 0.0, 0.8])
+    transform1[:3, :3] = tf.euler_matrix(0, np.pi/2, 0)[:3, :3]
+    panda1 = FrankaPanda(
+        name="panda1",
+        load_gripper=True, 
+        base_transform=torch.tensor(transform1, dtype=torch.float32),
+        device="cpu", load_visual_meshes=True)
+    transform2 = tf.translation_matrix([-0.1, 0.0, 0.8])
+    transform2[:3, :3] = tf.euler_matrix(0, -np.pi/2, 0)[:3, :3]
+    panda2 = FrankaPanda(
+        name="panda2",
+        load_gripper=True, 
+        base_transform=torch.tensor(transform2, dtype=torch.float32),
+        device="cpu", load_visual_meshes=True)
+    multi_panda = MultiURDFRobot(
+        urdf_robots=[panda1, panda2],
         device="cpu"
     )
-    test_urdf_vs_shapeenv(multi_urdf_robot, shape_env, show=False)
+    test_urdf_vs_shapeenv(multi_panda, shape_env, show=True)
 
     print("All tests passed")

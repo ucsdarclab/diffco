@@ -52,17 +52,54 @@ def test_urdf(urdf_robot: URDFRobot, num_cfgs=1000, show=False):
         print(f"Forward kinematics of {urdf_robot.name} verified")
 
 if __name__ == "__main__":
-    dvrk_urdf_robot = URDFRobot(
-        urdf_path=os.path.join(
-            robot_description_folder, 
-            "dvrk_model/urdf/both_sca.urdf"),
-        name="dvrk",
-        device="cpu",
-        load_visual_meshes=True
+    # dual panda arms placed like human-ish
+    # panda0 = FrankaPanda(
+    #     load_gripper=True,
+    #     base_transform=torch.eye(4, dtype=torch.float32),
+    #     device="cpu", load_visual_meshes=True)
+    transform1 = tf.translation_matrix([0.1, 0.0, 0.8])
+    transform1[:3, :3] = tf.euler_matrix(0, np.pi/2, 0)[:3, :3]
+    panda1 = FrankaPanda(
+        name="panda1",
+        load_gripper=True, 
+        base_transform=torch.tensor(transform1, dtype=torch.float32),
+        device="cpu", load_visual_meshes=True)
+    transform2 = tf.translation_matrix([-0.1, 0.0, 0.8])
+    transform2[:3, :3] = tf.euler_matrix(0, -np.pi/2, 0)[:3, :3]
+    panda2 = FrankaPanda(
+        name="panda2",
+        load_gripper=True, 
+        base_transform=torch.tensor(transform2, dtype=torch.float32),
+        device="cpu", load_visual_meshes=True)
+    multi_panda = MultiURDFRobot(
+        urdf_robots=[panda1, panda2],
+        device="cpu"
     )
-    test_urdf(dvrk_urdf_robot, show=True)
+    test_urdf(multi_panda, show=True)
 
     exit()
+
+    # rope_urdf_robot = URDFRobot(
+    #     urdf_path='../../robot_data/rope_description/rope.urdf',
+    #     base_transform=torch.eye(4),
+    #     device="cpu",
+    #     load_visual_meshes=True
+    # )
+    # test_urdf(rope_urdf_robot, show=True)
+
+    # exit()
+
+    # dvrk_urdf_robot = URDFRobot(
+    #     urdf_path=os.path.join(
+    #         robot_description_folder, 
+    #         "dvrk_model/urdf/both_sca.urdf"),
+    #     name="dvrk",
+    #     device="cpu",
+    #     load_visual_meshes=True
+    # )
+    # test_urdf(dvrk_urdf_robot, show=True)
+
+    # exit()
 
     two_link_robot = TwoLinkRobot()
     test_urdf(two_link_robot, show=False)

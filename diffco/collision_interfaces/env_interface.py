@@ -47,6 +47,7 @@ class ShapeEnv:
     }
     '''
     def __init__(self, shapes):
+        self.name = 'ShapeEnv'
         self.scene = trimesh.Scene()
         for shape_name in shapes:
             shape_type = shapes[shape_name]['type']
