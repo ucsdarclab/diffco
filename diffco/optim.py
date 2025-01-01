@@ -4,6 +4,7 @@ from collections import namedtuple
 import torch
 import numpy as np
 import time
+from typing import Dict
 from . import utils
 from .kernel_perceptrons import DiffCo
 from scipy.optimize import minimize, NonlinearConstraint
@@ -46,7 +47,7 @@ def adam_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
         # same as the other "cost" functions, just without preprocess.
         # Only for when the init_path is only two states.
         control_points = robot.fkine(p)
-        obj = (control_points[1:]-control_points[:-1]).pow(2).sum()
+        obj = (control_points[1:]-control_points[:-1]).square().sum()
         return obj.data.numpy()
 
     found = False
@@ -89,10 +90,10 @@ def adam_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
             cnt_check += len(p)  # Counting collision checks
             control_points = robot.fkine(p)
             max_move_cost = torch.clamp(
-                (control_points[1:]-control_points[:-1]).pow(2).sum(dim=2)-max_speed**2, min=0).sum()
+                (control_points[1:]-control_points[:-1]).square().sum(dim=2)-max_speed**2, min=0).sum()
             joint_limit_cost = (
                 torch.clamp(robot.limits[:, 0]-p, min=0) + torch.clamp(p-robot.limits[:, 1], min=0)).sum()
-            diff = (control_points[1:]-control_points[:-1]).pow(2).sum()
+            diff = (control_points[1:]-control_points[:-1]).square().sum()
             constraint_loss = collision_weight * collision_score\
                 + max_move_weight * max_move_cost + joint_limit_weight * joint_limit_cost
             objective_loss = dif_weight * diff
@@ -100,7 +101,7 @@ def adam_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
             loss.backward()
             p.grad[[0, -1]] = 0.0
             opt.step()
-            p.data = utils.wrap2pi(p.data)
+            # p.data = utils.wrap2pi(p.data)
             if history:
                 path_history.append(p.data.clone())
             if loss.data.numpy() < lowest_loss:
@@ -181,7 +182,7 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
     def pre_process(p):
         global var_p
         p = torch.DoubleTensor(p).reshape([-1, robot.dof])
-        p[:] = utils.wrap2pi(p)
+        # p[:] = utils.wrap2pi(p)
         var_p = torch.cat([init_path[:1], p, init_path[-1:]],
                           dim=0).requires_grad_(True)
         return var_p
@@ -239,7 +240,7 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
         var_p_cost = pre_process(p)
         latest_p_cost = var_p_cost.data[1:-1].numpy().reshape(-1)
         control_points = robot.fkine(var_p_cost)
-        obj = (control_points[1:]-control_points[:-1]).pow(2).sum()
+        obj = (control_points[1:]-control_points[:-1]).square().sum()
         return obj.data.numpy()
 
     def grad_cost(p):
@@ -311,7 +312,7 @@ def givengrad_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
         'start_cfg': start_cfg.numpy().tolist(),
         'target_cfg': target_cfg.numpy().tolist(),
         'cnt_check': cnt_check,
-        'cost': solution_rec.fun.item(),
+        'cost': solution_rec.fun,
         'time': end_t - start_t,
         'success': success,
         'seed': seed,
@@ -417,12 +418,12 @@ def trustconstr_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
             var_p_cost = pre_process(p)
             latest_p_cost = var_p_cost.data[1:-1].numpy().reshape(-1)
             control_points = robot.fkine(var_p_cost)
-            obj = (control_points[1:]-control_points[:-1]).pow(2).sum()
+            obj = (control_points[1:]-control_points[:-1]).square().sum()
             grad_cost_valid = False
         else:
             p = torch.cat([init_path[:1], p, init_path[-1:]], dim=0)
             control_points = robot.fkine(p)
-            obj = (control_points[1:]-control_points[:-1]).pow(2).sum()
+            obj = (control_points[1:]-control_points[:-1]).square().sum()
         return obj if return_tensor else obj.data.numpy()
 
     def grad_cost(p):
@@ -505,7 +506,7 @@ def trustconstr_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
         'start_cfg': start_cfg.numpy().tolist(),
         'target_cfg': target_cfg.numpy().tolist(),
         'cnt_check': cnt_check,
-        'cost': solution_rec.fun.item(),
+        'cost': solution_rec.fun,
         'time': end_t - start_t,
         'success': success,
         'seed': seed,
@@ -515,11 +516,12 @@ def trustconstr_traj_optimize(robot, dist_est, start_cfg, target_cfg, options):
     return rec
 
 
-def gradient_free_traj_optimize(robot, checker, start_cfg, target_cfg, options=None):
+def gradient_free_traj_optimize(robot, checker, start_cfg, target_cfg, options: Dict=None):
     N_WAYPOINTS = options['N_WAYPOINTS']
     NUM_RE_TRIALS = options['NUM_RE_TRIALS']
     MAXITER = options['MAXITER']
     max_speed = options['max_speed']
+    max_dense_waypoints = options.get('max_dense_waypoints', None)
 
     seed = options['seed']
     torch.manual_seed(seed)
@@ -536,7 +538,7 @@ def gradient_free_traj_optimize(robot, checker, start_cfg, target_cfg, options=N
     def con_collision_free(p):
         global cnt_check
         p = pre_process(p)
-        dense_p = utils.dense_path(p, max_speed)
+        dense_p = utils.dense_path(p, max_speed, max_dense_waypoints)
         collision_cost = -checker(dense_p[1:-1])
         cnt_check += len(dense_p)
         collision_cost = torch.clamp_(collision_cost, max=0).reshape(-1)
@@ -557,7 +559,7 @@ def gradient_free_traj_optimize(robot, checker, start_cfg, target_cfg, options=N
     def cost(p):
         p_tensor = pre_process(p)
         control_points = robot.fkine(p_tensor)
-        diff = (control_points[1:]-control_points[:-1]).pow(2).sum()
+        diff = (control_points[1:]-control_points[:-1]).square().sum()
         return diff.numpy()
 
     start_t = time.time()
@@ -589,27 +591,36 @@ def gradient_free_traj_optimize(robot, checker, start_cfg, target_cfg, options=N
                 (robot.limits[:, 1]-robot.limits[:, 0]) + robot.limits[:, 0]
         init_path[0] = start_cfg
         init_path[-1] = target_cfg
-        res = minimize(
-            cost, init_path[1:-1].reshape(-1).numpy(),
-            method='slsqp',
-            constraints=[
-                # {'fun': con_max_move, 'type': 'ineq'},
-                {'fun': con_collision_free, 'type': 'ineq'},
-                {'fun': con_joint_limit, 'type': 'ineq'}
-            ],
-            options={'maxiter': MAXITER, 'iprint': 2, 'disp': True})
+        # res = minimize(
+        #     cost, init_path[1:-1].reshape(-1).numpy(),
+        #     method='slsqp',
+        #     constraints=[
+        #         # {'fun': con_max_move, 'type': 'ineq'},
+        #         {'fun': con_collision_free, 'type': 'ineq'},
+        #         {'fun': con_joint_limit, 'type': 'ineq'}
+        #     ],
+        #     options={'maxiter': MAXITER, 'iprint': 2, 'disp': True})
+        
+        # trust-constr seems to be more robust than slsqp
+        res = minimize(cost, init_path[1:-1].reshape(-1).numpy(),
+                       method='trust-constr',
+                       constraints=[
+            NonlinearConstraint(con_collision_free, 0, np.inf), 
+            NonlinearConstraint(con_joint_limit, 0, np.inf), 
+        ],
+            options={'maxiter': MAXITER, **options['extra_optimizer_options']})
         if res.success:
             success = True
             break
     end_t = time.time()
 
     res.x = res.x.reshape([-1, robot.dof])
-    res.x = utils.wrap2pi(pre_process(res.x))
+    res.x = pre_process(res.x)
     rec = {
         'start_cfg': start_cfg.numpy().tolist(),
         'target_cfg': target_cfg.numpy().tolist(),
         'cnt_check': cnt_check,
-        'cost': res.fun.item(),
+        'cost': res.fun,
         'time': end_t - start_t,
         'success': success,
         'seed': seed,
@@ -704,7 +715,7 @@ class Weighted(TrajOptimizer):
             control_points = self.robot.fkine(p, reuse=not self.dense_check)
             if self.max_move_weight != 0:
                 max_move_cost = torch.clamp(
-                    (control_points[1:]-control_points[:-1]).pow(2).sum(dim=2)-self.max_speed**2, min=0).sum()
+                    (control_points[1:]-control_points[:-1]).square().sum(dim=2)-self.max_speed**2, min=0).sum()
             else:
                 max_move_cost = 0
             if self.joint_limit_weight != 0:
@@ -712,7 +723,7 @@ class Weighted(TrajOptimizer):
                     torch.clamp(self.robot.limits[:, 0]-p, min=0) + torch.clamp(p-self.robot.limits[:, 1], min=0)).sum()
             else:
                 joint_limit_cost = 0
-            diff = (control_points[1:]-control_points[:-1]).pow(2).sum() # .norm(dim=-1).sum() #
+            diff = (control_points[1:]-control_points[:-1]).square().sum() # .norm(dim=-1).sum() #
             constraint_loss = (
                 self.collision_weight * collision_score
                 + self.max_move_weight * max_move_cost

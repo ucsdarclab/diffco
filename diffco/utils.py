@@ -84,7 +84,10 @@ def make_continue(q, max_gap=np.pi):
     offset = -torch.cumsum(sudden_change, dim=0) * np.pi*2
     return q + offset
 
-def dense_path(q, max_step=2.0):
+def dense_path(q, max_step=2.0, max_step_num=None):
+    if max_step_num is not None:
+        tmp_step_size = torch.norm(q[1:] - q[:-1], dim=-1).sum().item() / max_step_num
+        max_step = max_step if max_step > tmp_step_size else tmp_step_size
     denseq = []
     for i in range(len(q)-1):
         delta = q[i+1] - q[i]

@@ -105,9 +105,11 @@ class CollisionChecker:
     def unnormalizer(self, normalized_q):
         raise NotImplementedError
     
-    def _generate_dataset(self, q, labels, dists, num_samples, verbose=False, **kwargs):
+    def _generate_dataset(self, q, labels, dists, num_samples, fix_joints=None, fix_joint_values=None, verbose=False):
         if q is None:
             q = self.robot.rand_configs(num_samples)
+        if fix_joints is not None:
+            q[:, fix_joints] = torch.tensor(fix_joint_values, dtype=q.dtype, device=q.device)
         num_samples = len(q)
         if labels is None:
             if verbose:
@@ -116,6 +118,8 @@ class CollisionChecker:
             labels = self.gt_check_func(q)
             if verbose:
                 print(f'Labels generated in {time.time()-start_time:.2f}s')
+        else:
+            labels = (labels > 0).type(q.dtype)
         if dists is None:
             dists = torch.zeros(num_samples, dtype=q.dtype, device=q.device)
         return q, labels, dists
@@ -171,7 +175,8 @@ class RBFDiffCo(CollisionChecker):
         When 0 < verify_ratio < 1, the model trains with a portion of the dataset and
         verifies the model with the rest of the dataset.
         '''
-        q, labels, dists = self._generate_dataset(q, labels, dists, num_samples, verbose=not self.perceptron_trained, **get_dataset_kwargs)
+        get_dataset_kwargs['verbose'] = not self.perceptron_trained
+        q, labels, dists = self._generate_dataset(q, labels, dists, num_samples, **get_dataset_kwargs)
 
         num_samples = len(q)
         labels = (2*labels-1).type(q.dtype)
@@ -182,6 +187,9 @@ class RBFDiffCo(CollisionChecker):
             verify_mask[verify_indices] = True
             q_train, q_verify = q[~verify_mask], q[verify_mask]
             labels_train, labels_verify = labels[~verify_mask], labels[verify_mask]
+            if verbose:
+                print(f'Positive verify labels: {(labels_verify == 1).sum()}, Negative verify labels: {(labels_verify == -1).sum()}')
+                print(f'label_verify: {labels_verify}')
             dists_train, dists_verify = dists[~verify_mask], dists[verify_mask]
         elif verify_ratio:
             raise ValueError(f'verify_ratio should be in (0, 1), got {verify_ratio}')
@@ -189,6 +197,7 @@ class RBFDiffCo(CollisionChecker):
             q_train = q
             labels_train = labels
             dists_train = dists
+            q_verify = self.robot.rand_configs(100)
 
         self.perceptron.train(
             q_train, labels_train, 
@@ -196,13 +205,11 @@ class RBFDiffCo(CollisionChecker):
             max_iteration=len(q_train), distance=dists_train, verbose=verbose)
         inference_kernel_func = kernel.Polyharmonic(k=1, epsilon=1)
         self.perceptron.fit_poly(kernel_func=inference_kernel_func, target='label')
-        if not self.perceptron_trained:
-            self.q_verify = q_verify
 
-        self.safety_bias = self._calculate_safety_bias(self.q_verify)
+        self.safety_bias = self._calculate_safety_bias(q_verify)
         # Verification needs self.safety_bias
         if verify_ratio:
-            verify_acc, verify_tpr, verify_tnr = self.verify(self.q_verify, labels_verify)
+            verify_acc, verify_tpr, verify_tnr = self.verify(q_verify, labels_verify)
         else:
             verify_acc, verify_tpr, verify_tnr = None, None, None
         
@@ -245,8 +252,13 @@ class RBFDiffCo(CollisionChecker):
 
     def verify(self, q_verify=None, labels_verify=None, num_samples=None, verbose=False):
         if q_verify is None:
-            q_verify = self.q_verify if num_samples is None \
-                else self.robot.rand_configs(num_samples)
+            if num_samples is not None:
+                q_verify = self.robot.rand_configs(num_samples)
+                self.q_verify = q_verify
+            elif self.q_verify is not None:
+                q_verify = self.q_verify
+            else:
+                raise ValueError('self.q_verify or num_samples should be provided')
         scores_verify = self.perceptron.poly_score(q_verify)
         # scores_verify = self.perceptron.score_original(q_verify)
         preds_verify = scores_verify > 0
@@ -457,7 +469,7 @@ class ForwardKinematicsDiffCo(RBFDiffCo, CollisionChecker):
         if transform is not None:
             q = self._uniform_sample_on_transformed_manifold(transform, num_samples)
             num_samples = len(q)
-        return super()._generate_dataset(q, labels, dists, num_samples, verbose)
+        return super()._generate_dataset(q, labels, dists, num_samples, verbose=verbose, **kwargs)
 
     # def fit(self, q=None, labels=None, dists=None, num_samples=5000, verify_ratio=0.1, verbose=False, sample_transform=None):
     #     return super().fit(
