@@ -10,3 +10,6 @@ pyyaml
 trimesh
 yourdfpy
 pyglet<2
+websockets<14
+jupyter[lab]
+roboticstoolbox-python[nb,collision]
