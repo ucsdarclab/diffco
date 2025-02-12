@@ -25,7 +25,7 @@ import fcl
 from fcl import defaultCollisionCallback
 import numpy as np
 
-import robot_data
+from diffco import robot_data
 
 from .rigid_body import RigidBody
 from .robot_interface_base import RobotInterfaceBase

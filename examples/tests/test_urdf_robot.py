@@ -80,7 +80,7 @@ if __name__ == "__main__":
     exit()
 
     # rope_urdf_robot = URDFRobot(
-    #     urdf_path='../../robot_data/rope_description/rope.urdf',
+    #     urdf_path='../../diffco/robot_data/rope_description/rope.urdf',
     #     base_transform=torch.eye(4),
     #     device="cpu",
     #     load_visual_meshes=True

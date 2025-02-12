@@ -6,24 +6,7 @@ import time
 
 import torch
 
-# from yourdfpy import URDF
-# from trimesh import transformations as tf
-# import trimesh
-# from trimesh.scene.scene import append_scenes
-# import trimesh.viewer
-# from trimesh.viewer import windowed
-# import fcl
-# from fcl import defaultCollisionCallback
-# import numpy as np
-
-# import robot_data
-
-# from .rigid_body import RigidBody
 from .robot_interface_base import RobotInterfaceBase
-# from .spatial_vector_algebra import CoordinateTransform
-# from .env_interface import ShapeEnv
-
-# robot_description_folder = robot_data.__path__[0]
 
 try:
     import curobo

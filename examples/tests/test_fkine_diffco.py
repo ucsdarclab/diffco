@@ -223,8 +223,9 @@ class TestForwardKinematicsDiffCo(unittest.TestCase):
         fkdc = dc.ForwardKinematicsDiffCo(
             robot=dual_panda_shoulder,
             environment=shape_env,
+            gamma=10,
         )
-        acc, tpr, tnr = fkdc.fit(num_samples=10000, verbose=True, sample_transform='fkine') # 'fkine')
+        acc, tpr, tnr = fkdc.fit(num_samples=10000, verbose=True)#, sample_transform='fkine')
 
         self.visual_test(fkdc, num_cfgs=50)
 
