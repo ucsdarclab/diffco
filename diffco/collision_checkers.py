@@ -210,6 +210,7 @@ class RBFDiffCo(CollisionChecker):
         # Verification needs self.safety_bias
         if verify_ratio:
             verify_acc, verify_tpr, verify_tnr = self.verify(q_verify, labels_verify)
+            self.q_verify = q_verify
         else:
             verify_acc, verify_tpr, verify_tnr = None, None, None
         
@@ -470,14 +471,6 @@ class ForwardKinematicsDiffCo(RBFDiffCo, CollisionChecker):
             q = self._uniform_sample_on_transformed_manifold(transform, num_samples)
             num_samples = len(q)
         return super()._generate_dataset(q, labels, dists, num_samples, verbose=verbose, **kwargs)
-
-    # def fit(self, q=None, labels=None, dists=None, num_samples=5000, verify_ratio=0.1, verbose=False, sample_transform=None):
-    #     return super().fit(
-    #         q, labels, dists, 
-    #         num_samples=num_samples, 
-    #         verify_ratio=verify_ratio, 
-    #         verbose=verbose, 
-    #         sample_transform=sample_transform)
     
     def collision_score(
             self, 

@@ -28,7 +28,7 @@ class TestForwardKinematicsDiffCo(unittest.TestCase):
             }
         )
         rope_urdf_robot = dc.URDFRobot(
-            urdf_path='../../robot_data/rope_description/rope.urdf',
+            urdf_path='../../diffco/robot_data/rope_description/rope.urdf',
             base_transform=torch.eye(4),
             device="cpu",
             load_visual_meshes=False
