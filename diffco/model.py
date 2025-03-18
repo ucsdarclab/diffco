@@ -176,6 +176,8 @@ class DHParameters():
         self.alpha = torch.FloatTensor(alpha)
         self.d = torch.FloatTensor(d)
         self.theta = torch.FloatTensor(theta)
+        self.s_alpha = self.alpha.sin()
+        self.c_alpha = self.alpha.cos()
     
     def cuda(self):
         self.a = self.a.cuda()
@@ -431,17 +433,74 @@ class PandaFK(Model):
         q = torch.reshape(q, (-1, self.dof))
         angles = q + self.dhparams.theta
         tfs = DH2mat(angles, self.dhparams.a, self.dhparams.d, self.s_alpha, self.c_alpha)
-        # assert tfs.shape == (len(q), self.dof, 4, 4)
-        cum_tfs = []
+        assert tfs.shape == (len(q), self.dof, 4, 4)
+        fk_points = []
         tmp_tf = tfs[:, 0]
         if self.fk_mask[0]:
-            cum_tfs.append(tmp_tf)
+            fk_points.append(tmp_tf[:, :3, 3])
         for i in range(1, self.dof):
             tmp_tf = torch.bmm(tmp_tf, tfs[:, i])
             if self.fk_mask[i]:
-                cum_tfs.append(tmp_tf)
-        self.fkine_backup = torch.stack([t[:, :3, 3] for t in cum_tfs], dim=1)
+                fk_points.append(tmp_tf[:, :3, 3])
+        extra_ee_fk_points = tmp_tf.new_zeros(tmp_tf.shape[0], 4, 2)
+        extra_ee_fk_points[:, 3, :] = 1
+        extra_ee_fk_points[:, 1, 0] = 0.5 * self.dhparams.d[-1] # left_finger y
+        extra_ee_fk_points[:, 1, 1] = -0.5 * self.dhparams.d[-1] # right_finger y
+        extra_ee_fk_points = tmp_tf @ extra_ee_fk_points
+        fk_points += [extra_ee_fk_points[:, :3, 0], extra_ee_fk_points[:, :3, 1]]
+        self.fkine_backup = torch.stack(fk_points, dim=1)
+        # print(f"FK: {self.fkine_backup.shape}")
         return self.fkine_backup
+    
+
+class DualPandaFK(Model):
+    def __init__(self):
+        super().__init__()
+        self.limits = torch.FloatTensor([[-2.8973, 2.8973],
+                                        [-2.8973, 2.8973],                
+                                        [-1.7628, 1.7628],
+                                        [-1.7628, 1.7628],
+                                        [-2.8973, 2.8973],
+                                        [-2.8973, 2.8973],
+                                        [-3.0718, -0.0698],
+                                        [-3.0718, -0.0698],
+                                        [-2.8973, 2.8973],
+                                        [-2.8973, 2.8973],
+                                        [-0.0175, 3.7525],
+                                        [-0.0175, 3.7525],
+                                        [-2.8973, 2.8973],
+                                        [-2.8973, 2.8973]])  # Set joint limits for 14 DOF
+        self.left_panda = PandaFK()  # Reuse existing Panda FK logic
+        self.right_panda = PandaFK()
+        
+        # Define base transforms for left and right arms
+        right_base = torch.FloatTensor([0.0, 0.0, 0.0])
+        left_base = torch.FloatTensor([0.0, 0.84, 0.0])  # Offset right arm by 0.84m in y-axis
+        self.bases = torch.stack([left_base, right_base], dim=0)
+
+        self.dhparams = self.left_panda.dhparams
+        self.dof = 14
+
+        self.fkine_backup = None
+
+    def fkine(self, q, reuse=False):
+        if reuse:
+            return self.fkine_backup
+        q = q.view(-1, 14)
+        left_q = q[:, [1, 3, 5, 7, 9, 11, 13]]
+        right_q = q[:, [0, 2, 4, 6, 8, 10, 12]]
+        
+        # Compute FK for both arms
+        left_fk = self.left_panda.fkine(left_q)
+        right_fk = self.right_panda.fkine(right_q)
+        
+        # Apply base offsets
+        left_fk += self.bases[0]
+        right_fk += self.bases[1]
+
+        # Concatenate FK results
+        return torch.cat([left_fk, right_fk], dim=1)
+
 
 class PointRobot1D(Model):
     def __init__(self, limits):
