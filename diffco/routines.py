@@ -180,12 +180,14 @@ def train_checker(
     Returns:
         diffco.CollisionChecker: The trained collision checker.
     """
-    kernel_func = kernel.FKKernel(fkine, kernel.RQKernel(lmbda)) if fkine is not None else kernel.RQKernel(lmbda)
-    checker = checker_type(obstacles, kernel_func=kernel_func, beta=1.0) 
-    checker.train(train_data, train_labels, max_iteration=len(train_data), distance=train_dists)
+    # kernel_func = kernel.FKKernel(fkine, kernel.RQKernel(lmbda)) if fkine is not None else kernel.RQKernel(lmbda)
+    kernel_func = kernel.RQKernel(lmbda)
+    checker = checker_type(kernel_func=kernel_func, beta=1.0, transform=fkine) 
+    checker.train(train_data, train_labels, max_iteration=len(train_data), distance=train_dists, verbose=True)
     if trained_checker_dump is not None:
-        os.makedirs('results', exist_ok=True)
-        with open(os.path.join('results', f'{trained_checker_dump}.p'), 'wb') as f:
+        # os.makedirs('results', exist_ok=True)
+        # with open(os.path.join('results', f'{trained_checker_dump}.p'), 'wb') as f:
+        with open(trained_checker_dump, 'wb') as f:
             pickle.dump(checker, f)
             print('checker saved: {}'.format(f.name))
     return checker
@@ -214,7 +216,7 @@ def fit_checker(
         fkine (Callable): The forward kinematics method (defaults to None).
     """
     if fit_full_poly:
-        checker.fit_full_poly(epsilon=fitting_epsilon, k=3, target=fitting_target, fkine=fkine)
+        checker.fit_full_poly(epsilon=fitting_epsilon, k=3, target=fitting_target)
     else:
         if kernel_type == kernel.Polyharmonic:
             kernel_func = kernel.Polyharmonic(1, fitting_epsilon)
@@ -222,7 +224,7 @@ def fit_checker(
             kernel_func = kernel.MultiQuadratic(fitting_epsilon)
         else:
             raise NotImplementedError(kernel_type)
-        checker.fit_poly(kernel_func=kernel_func, target=fitting_target, fkine=fkine)
+        checker.fit_poly(kernel_func=kernel_func, target=fitting_target)
 
 def get_estimator(checker: CollisionChecker, scoring_method: str = 'rbf_score') -> Callable:
     """Get estimator using the desired scoring method.
